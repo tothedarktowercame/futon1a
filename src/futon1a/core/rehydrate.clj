@@ -3,6 +3,13 @@
 
    Rehydration must be all-or-nothing: failures abort startup.")
 
+(defn layer2-error
+  "Build a Layer 2 error map." [reason context]
+  {:error/layer 2
+   :error/status 500
+   :error/reason reason
+   :error/context context})
+
 (defn- non-empty-vector? [v]
   (and (vector? v) (seq v)))
 
@@ -10,10 +17,12 @@
   [result]
   (cond
     (nil? result)
-    (throw (ex-info "rehydration returned nil" {:reason :rehydration-nil}))
+    (throw (ex-info "rehydration returned nil"
+                    {:error (layer2-error :rehydration-nil {})}))
 
     (not (map? result))
-    (throw (ex-info "rehydration returned non-map" {:reason :rehydration-invalid}))
+    (throw (ex-info "rehydration returned non-map"
+                    {:error (layer2-error :rehydration-invalid {:result result})}))
 
     :else
     result))
@@ -29,20 +38,21 @@
   "
   [{:keys [load-fn validate-fn]}]
   (when-not (fn? load-fn)
-    (throw (ex-info "load-fn required" {:reason :missing-load-fn})))
+    (throw (ex-info "load-fn required"
+                    {:error (layer2-error :missing-load-fn {})})))
   (let [data (normalize-result (load-fn))
         entities (:entities data)
         relations (:relations data)]
     (when-not (non-empty-vector? entities)
-      (throw (ex-info "rehydration produced empty entities" {:reason :empty-entities})))
+      (throw (ex-info "rehydration produced empty entities"
+                      {:error (layer2-error :empty-entities {})})))
     (when (and relations (not (vector? relations)))
       (throw (ex-info "rehydration relations must be vector"
-                      {:reason :invalid-relations})))
+                      {:error (layer2-error :invalid-relations {})})))
     (when validate-fn
-      (let [{:keys [ok? errors] :as res} (validate-fn data)]
+      (let [{:keys [ok? errors]} (validate-fn data)]
         (when-not ok?
           (throw (ex-info "integrity validation failed"
-                          {:reason :integrity-failed
-                           :errors errors
-                           :result res})))))
+                          {:error (layer2-error :integrity-failed
+                                               {:errors errors})})))))
     data))

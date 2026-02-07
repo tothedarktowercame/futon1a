@@ -50,7 +50,7 @@
                            :actor "tester"
                            :claim {:op :noop}
                            :detail {}
-                           :write-fn (fn [] :ok)})]
+                           :write-fn (fn [] [{:op :noop}])})]
       (is (:ok? (proof/validate-complete-path path)))))
   (testing "incomplete path is rejected"
     (let [p (proof/new-path)

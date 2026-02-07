@@ -5,6 +5,13 @@
   (:require [clojure.string :as str])
   (:import (java.util UUID)))
 
+(defn layer1-error
+  "Build a Layer 1 error map." [reason context]
+  {:error/layer 1
+   :error/status 409
+   :error/reason reason
+   :error/context context})
+
 (defn uuid-string?
   [s]
   (when (string? s)
@@ -31,14 +38,15 @@
   "
   [{:keys [id external-id source existing-by-external]}]
   (when (and id (not (uuid-string? id)))
-    (throw (ex-info "Entity id must be UUID" {:reason :invalid-id :id id})))
+    (throw (ex-info "Entity id must be UUID"
+                    {:error (layer1-error :invalid-id {:id id})})))
   (let [ext-id (normalize-external-id external-id)]
     (when (and existing-by-external ext-id)
       (throw (ex-info "External id already in use"
-                      {:reason :external-id-conflict
-                       :external-id ext-id
-                       :existing existing-by-external
-                       :source source})))
+                      {:error (layer1-error :external-id-conflict
+                                            {:external-id ext-id
+                                             :existing existing-by-external
+                                             :source source})})))
     {:ok? true
      :id (or id (str (UUID/randomUUID)))
      :external-id ext-id}))

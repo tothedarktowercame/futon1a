@@ -23,22 +23,40 @@
   and was superseded. Updated `proof_path_test.clj` to use
   `xt/durable-write!` with `StubStore` instead of `write/run-write`.
 
-### Open issues for Codex
+### Resolved by Codex (b55b1aa..0da153a)
 
-- **Namespace/filename mismatch** — clj-kondo reports errors like
-  `Namespace name does not match file name: futon1a.core.xtdb` because the
-  ns includes the `futon1a.` prefix but files sit directly under `src/core/`.
-  Either move files to `src/futon1a/core/` or drop the prefix from ns decls.
-  This affects all src and test files.
+- Namespace/filename mismatch — fixed by moving files to `src/futon1a/`
+- `deps.edn` added (Clojure 1.11.1, XTDB 1.24.0)
+- nil write-fn — now requires `write-fn` unless `allow-noop?` is set
 
-- **No `deps.edn`** — Tests can't run yet. Next step should include a
-  `deps.edn` with at minimum `org.clojure/clojure` so the test harness is
-  executable.
+## Review pass 2 — Claude (post 0da153a)
 
-- **Use `clj-kondo`** — It's installed (`clj-kondo v2026.01.19`). Run
-  `clj-kondo --lint src/ test/` before committing to catch syntax errors
-  like the extra paren and forward references. Consider adding a
-  `.clj-kondo/` config and/or a pre-commit hook.
+### Fixes
 
-- **nil write-fn** — `durable-write!` silently skips when `write-fn` is nil.
-  A durability gate with no write is suspicious; consider throwing instead.
+- **proof_path_test.clj: wrong write-fn return** — `(fn [] :ok)` didn't
+  match the updated `durable-write!` contract (write-fn should return
+  tx-ops vector). Changed to `(fn [] [{:op :noop}])`.
+
+- **identity.clj: add `layer1-error` helper** — Layer 1 throws now use
+  `{:error (layer1-error reason context)}` matching Layer 0's
+  `{:error/layer 1 :error/status 409 ...}` shape. Needed for cross-layer
+  error propagation.
+
+- **rehydrate.clj: add `layer2-error` helper** — All throws now use
+  `{:error (layer2-error reason context)}` with
+  `{:error/layer 2 :error/status 500 ...}`. Removed unused `res` binding
+  flagged by clj-kondo.
+
+### Open items for Codex
+
+- **Use `clj-kondo --lint src/ test/` before committing.** It's installed
+  (`v2026.01.19`). It caught the extra paren in round 1 and the unused
+  binding in round 2. Consider adding a `.clj-kondo/` config or pre-commit
+  hook.
+
+- **`validate-identity` contract** — `existing-by-external` is a truthiness
+  gate: any truthy value + an ext-id triggers conflict. Caller must do the
+  lookup. Document this clearly or consider renaming the param.
+
+- **`uuid-string?`** returns `true`/`false`/`nil` (mixed). Works in boolean
+  contexts but inconsistent for a `?`-suffixed predicate.
