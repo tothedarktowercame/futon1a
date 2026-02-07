@@ -59,11 +59,11 @@
                 (proof/append-edn! path proof-log-path))]
         {:tx-id tx-id
          :path path})
-      (catch Throwable t
+      (catch Exception e
         (throw (ex-info "durable write failed"
                         {:error (layer0-error :durability-failure
-                                              {:message (.getMessage t)})}
-                        t))))))
+                                              {:message (.getMessage e)})}
+                        e))))))
 
 (defrecord StubStore []
   DurableStore

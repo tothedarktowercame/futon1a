@@ -1,7 +1,7 @@
 (ns futon1a.test.invariants.proof-path-test
   (:require [clojure.test :refer [deftest is testing]]
             [futon1a.diag.proof-path :as proof]
-            [futon1a.core.write-pipeline :as write]))
+            [futon1a.core.xtdb :as xt]))
 
 (deftest proof-path-ordering
   (testing "proof-path phases enforce ordering"
@@ -45,7 +45,12 @@
 
 (deftest proof-path-complete-validation
   (testing "complete path requires full phase sequence"
-    (let [{:keys [path]} (write/run-write {:actor "tester" :claim {:op :noop}})]
+    (let [{:keys [path]} (xt/durable-write!
+                          {:store (xt/->StubStore)
+                           :actor "tester"
+                           :claim {:op :noop}
+                           :detail {}
+                           :write-fn (fn [] :ok)})]
       (is (:ok? (proof/validate-complete-path path)))))
   (testing "incomplete path is rejected"
     (let [p (proof/new-path)

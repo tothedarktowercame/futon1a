@@ -189,7 +189,15 @@
             errors (vec (concat event-errors phase-errors))]
         (if (seq errors)
           {:ok? false :errors errors}
-          {:ok? true}))))))
+          {:ok? true})))))
+
+(defn complete?
+  "True when the path ends with :clock-out." [{:keys [events]}]
+  (= :clock-out (some-> events last :phase)))
+
+(defn event-seq
+  "Return the ordered list of phases for this path." [{:keys [events]}]
+  (map :phase events))
 
 (defn validate-complete-path
   "Validate that a path is well-formed and complete (full phase sequence).
@@ -209,14 +217,6 @@
 
       :else
       {:ok? true})))
-
-(defn complete?
-  "True when the path ends with :clock-out." [{:keys [events]}]
-  (= :clock-out (some-> events last :phase)))
-
-(defn event-seq
-  "Return the ordered list of phases for this path." [{:keys [events]}]
-  (map :phase events))
 
 (defn path->edn
   "Serialize a path to EDN string." [path]
