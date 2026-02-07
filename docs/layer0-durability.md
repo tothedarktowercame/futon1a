@@ -6,18 +6,25 @@ write gate. It is a stub until XTDB integration is added.
 ## Interface
 
 - `DurableStore` protocol
-  - `tx-sync!` blocks until a durable commit is confirmed and returns a tx-id.
+  - `submit-tx!` submits tx ops and returns a tx-id.
+  - `tx-sync!` blocks until the given tx-id is durably confirmed.
 
 ## Durable Write
 
-`durable-write!` wraps a write with the proof-path sequence and calls
-`tx-sync!` to confirm durability. The result includes:
+`durable-write!` wraps a write with the proof-path sequence. It calls
+`submit-tx!` with tx ops from `write-fn`, then `tx-sync!` to confirm durability.
+The result includes:
 
 - `:tx-id` (string)
 - `:path` (proof-path event log)
 
 If `:proof-log-path` is provided, the proof-path is appended as a single EDN
 line to the file.
+
+## XTDB Adapter
+
+`src/futon1a/core/xtdb_node.clj` provides an XTDB-backed `DurableStore`
+implementation (`XtdbStore`) with `submit-tx!` and `tx-sync!`.
 
 ## Errors
 

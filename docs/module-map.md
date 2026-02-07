@@ -19,6 +19,7 @@ This module map operationalizes the mission's Pattern → Code mapping and estab
 |--------|----------------|----------|
 | `src/futon1a/core/invariants.clj` | Global invariant checks + counter-ratchet | `storage/invariants-vs-repair` |
 | `src/futon1a/core/mirror.clj` | Datascript ↔ XTDB mirroring | `storage/persistence-speed-mirroring` |
+| `src/futon1a/core/xtdb_node.clj` | XTDB adapter for durability | `storage/durability-first` |
 | `src/futon1a/diag/health.clj` | Diagnostics + error context | `storage/rapid-debugging` |
 | `src/futon1a/ingest/open_world.clj` | Open-world ingest + validation | `storage/open-world-velocity-validation` |
 | `src/futon1a/api/errors.clj` | Error mapping to layers | `storage/error-layer-hierarchy` |

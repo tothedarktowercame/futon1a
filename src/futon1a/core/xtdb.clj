@@ -7,7 +7,8 @@
   (:require [futon1a.diag.proof-path :as proof]))
 
 (defprotocol DurableStore
-  (tx-sync! [store] "Block until durable commit confirmed; returns tx-id string."))
+  (submit-tx! [store tx-ops] "Submit tx ops; returns tx-id string.")
+  (tx-sync! [store tx-id] "Block until durable commit confirmed for tx-id."))
 
 (defn layer0-error
   "Build a Layer 0 error map." [reason context]
@@ -24,7 +25,7 @@
    - actor (string)
    - claim (any)
    - detail (any)
-   - write-fn (fn [] => side effects; should throw on failure)
+   - write-fn (fn [] => tx-ops) or nil if allow-noop?
    - allow-noop? (boolean, optional) => allow nil write-fn
    - proof-log-path (string, optional) => append proof-path EDN line
 
@@ -45,10 +46,14 @@
     (try
       (when (and (nil? write-fn) (not allow-noop?))
         (throw (ex-info "write-fn required" {:reason :missing-write-fn})))
-      (when write-fn (write-fn))
-      (let [path (proof/append-event path (ev :verify))
+      (let [tx-ops (when write-fn (write-fn))
+            _ (when (and (nil? tx-ops) (not allow-noop?) write-fn)
+                (throw (ex-info "write-fn returned nil tx-ops" {:reason :missing-tx-ops})))
+            path (proof/append-event path (ev :verify))
             path (proof/append-event path (ev :invariant-check))
-            tx-id (tx-sync! store)
+            tx-id (when tx-ops (submit-tx! store tx-ops))
+            tx-id (or tx-id "tx-noop")
+            _ (when tx-ops (tx-sync! store tx-id))
             path (proof/append-event path (proof/event {:path/id pid
                                                         :actor actor
                                                         :phase :proof-commit
@@ -70,4 +75,5 @@
 
 (defrecord StubStore []
   DurableStore
-  (tx-sync! [_] "tx-stub"))
+  (submit-tx! [_ _] "tx-stub")
+  (tx-sync! [_ _] true))

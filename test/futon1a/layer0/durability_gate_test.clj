@@ -5,7 +5,8 @@
 
 (defrecord TestStore [tx]
   xt/DurableStore
-  (tx-sync! [_] tx))
+  (submit-tx! [_ _] tx)
+  (tx-sync! [_ _] true))
 
 (deftest durable-write-produces-proof-path
   (testing "durable write emits complete proof-path"
@@ -15,7 +16,7 @@
                    :actor "tester"
                    :claim {:op :noop}
                    :detail {:layer 0}
-                   :write-fn (fn [] :ok)})]
+                   :write-fn (fn [] [{:op :noop}])})]
       (is (= "tx-1" (:tx-id result)))
       (is (:ok? (proof/validate-complete-path (:path result)))))))
 
@@ -28,7 +29,7 @@
                      :actor "tester"
                      :claim {:op :noop}
                      :detail {:layer 0}})))
-      (is (:tx-id (xt/durable-write!
+      (is (= "tx-noop" (:tx-id (xt/durable-write!
                    {:store store
                     :actor "tester"
                     :claim {:op :noop}
@@ -45,6 +46,6 @@
         :actor "tester"
         :claim {:op :noop}
         :detail {:layer 0}
-        :write-fn (fn [] :ok)
+        :write-fn (fn [] [{:op :noop}])
         :proof-log-path (.getPath tmp)})
       (is (re-find #":path/id" (slurp tmp))))))
