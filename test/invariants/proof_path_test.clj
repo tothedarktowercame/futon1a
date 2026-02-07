@@ -1,6 +1,7 @@
 (ns futon1a.test.invariants.proof-path-test
   (:require [clojure.test :refer [deftest is testing]]
-            [futon1a.diag.proof-path :as proof]))
+            [futon1a.diag.proof-path :as proof]
+            [futon1a.core.write-pipeline :as write]))
 
 (deftest proof-path-ordering
   (testing "proof-path phases enforce ordering"
@@ -41,6 +42,19 @@
           bad-path (assoc p :events [ev2 ev1])]
       (is (:ok? (proof/validate-path ok-path)))
       (is (false? (:ok? (proof/validate-path bad-path)))))))
+
+(deftest proof-path-complete-validation
+  (testing "complete path requires full phase sequence"
+    (let [{:keys [path]} (write/run-write {:actor "tester" :claim {:op :noop}})]
+      (is (:ok? (proof/validate-complete-path path)))))
+  (testing "incomplete path is rejected"
+    (let [p (proof/new-path)
+          ev1 (proof/event {:path/id (:path/id p)
+                            :actor "tester"
+                            :phase :clock-in})
+          path (proof/append-event p ev1)
+          res (proof/validate-complete-path path)]
+      (is (false? (:ok? res))))))
 
 (deftest proof-path-edn-append
   (testing "append-edn! writes a line"

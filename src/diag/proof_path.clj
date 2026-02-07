@@ -31,6 +31,18 @@
               :error map?
               :evidence map?}})
 
+(def ^:private path-schema
+  "Minimal schema for a proof-path container."
+  {:required {:path/id string?
+              :path/created-at integer?
+              :events vector?}})
+
+(def ^:private error-codes
+  #{:proof/invalid-event
+    :proof/invalid-path
+    :proof/invalid-order
+    :proof/incomplete-path})
+
 (defn- now-ms [] (System/currentTimeMillis))
 
 (defn- uuid [] (str (UUID/randomUUID)))
@@ -42,6 +54,14 @@
   (and (valid-phase? prev)
        (valid-phase? next)
        (= (inc (phase->index prev)) (phase->index next))))
+
+(defn- error
+  [code message context]
+  (when-not (contains? error-codes code)
+    (throw (ex-info "unknown proof-path error code" {:code code})))
+  {:error/code code
+   :error/message message
+   :error/context context})
 
 (defn new-path
   "Create a new, empty proof-path log." []
@@ -135,35 +155,60 @@
 
 (defn validate-path
   "Validate a full path:
+   - path container matches schema
    - each event passes schema
    - event phases are strictly ordered
    Returns {:ok? true} or {:ok? false :errors [...]}"
   [{:keys [events] :as path}]
-  (if (nil? events)
-    {:ok? false :errors [{:field :events :reason :missing}]}
-    (let [event-errors (->> events
-                            (map-indexed
-                             (fn [idx ev]
-                               (let [res (validate-event ev)]
-                                 (when-not (:ok? res)
-                                   {:index idx :errors (:errors res)}))))
-                            (remove nil?)
-                            vec)
-          phase-errors (->> events
-                            (partition 2 1)
-                            (map-indexed
-                             (fn [idx [a b]]
-                               (when-not (next-phase? (:phase a) (:phase b))
-                                 {:index idx
-                                  :reason :invalid-phase-order
-                                  :from (:phase a)
-                                  :to (:phase b)})))
-                            (remove nil?)
-                            vec)
-          errors (vec (concat event-errors phase-errors))]
-      (if (seq errors)
-        {:ok? false :errors errors}
-        {:ok? true}))))
+  (let [container-errors (->> (:required path-schema)
+                              (keep (fn [[k pred]]
+                                      (when-not (pred (get path k))
+                                        {:field k :reason :invalid-or-missing})))
+                              vec)]
+    (if (seq container-errors)
+      {:ok? false :errors container-errors}
+      (let [event-errors (->> events
+                              (map-indexed
+                               (fn [idx ev]
+                                 (let [res (validate-event ev)]
+                                   (when-not (:ok? res)
+                                     {:index idx :errors (:errors res)}))))
+                              (remove nil?)
+                              vec)
+            phase-errors (->> events
+                              (partition 2 1)
+                              (map-indexed
+                               (fn [idx [a b]]
+                                 (when-not (next-phase? (:phase a) (:phase b))
+                                   {:index idx
+                                    :reason :invalid-phase-order
+                                    :from (:phase a)
+                                    :to (:phase b)})))
+                              (remove nil?)
+                              vec)
+            errors (vec (concat event-errors phase-errors))]
+        (if (seq errors)
+          {:ok? false :errors errors}
+          {:ok? true}))))))
+
+(defn validate-complete-path
+  "Validate that a path is well-formed and complete (full phase sequence).
+   Returns {:ok? true} or {:ok? false :errors [...]}"
+  [path]
+  (let [base (validate-path path)
+        phases (vec (event-seq path))]
+    (cond
+      (not (:ok? base))
+      base
+
+      (not= phases proof-path-phases)
+      {:ok? false
+       :errors [(error :proof/incomplete-path
+                       "proof path does not contain full phase sequence"
+                       {:expected proof-path-phases :actual phases})]}
+
+      :else
+      {:ok? true})))
 
 (defn complete?
   "True when the path ends with :clock-out." [{:keys [events]}]
