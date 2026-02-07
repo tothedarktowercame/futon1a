@@ -41,3 +41,16 @@
           bad-path (assoc p :events [ev2 ev1])]
       (is (:ok? (proof/validate-path ok-path)))
       (is (false? (:ok? (proof/validate-path bad-path)))))))
+
+(deftest proof-path-edn-append
+  (testing "append-edn! writes a line"
+    (let [p (proof/new-path)
+          ev1 (proof/event {:path/id (:path/id p)
+                            :actor "tester"
+                            :phase :clock-in})
+          path (proof/append-event p ev1)
+          tmp (java.io.File/createTempFile "futon1a-proof" ".edn")]
+      (.deleteOnExit tmp)
+      (proof/append-edn! path (.getPath tmp))
+      (let [contents (slurp tmp)]
+        (is (re-find #":path/id" contents))))))

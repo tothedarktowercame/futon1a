@@ -29,6 +29,11 @@ Optional:
 - `validate-event` checks required fields and phase validity.
 - `validate-path` checks schema plus strict phase ordering.
 
+## Serialization
+
+- `path->edn` returns a single EDN string for the path.
+- `append-edn!` appends one path per line to a file.
+
 ## Module
 
 Implementation scaffold: `src/diag/proof_path.clj`.

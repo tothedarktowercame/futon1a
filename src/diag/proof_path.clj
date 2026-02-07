@@ -3,6 +3,7 @@
 
    Pure data model for ordered proof-path events. Storage and IO are handled
    by callers; this module only validates and constructs event maps."
+  (:require [clojure.java.io :as io])
   (:import (java.util UUID)))
 
 (def ^:private proof-path-phases
@@ -19,7 +20,7 @@
   (zipmap proof-path-phases (range)))
 
 (def ^:private event-schema
-  "Minimal schema for a proof-path event. Keys are required unless noted." 
+  "Minimal schema for a proof-path event. Keys are required unless noted."
   {:required {:path/id string?
               :actor string?
               :phase keyword?
@@ -50,7 +51,7 @@
 
 (defn validate-event
   "Validate event against the minimal schema.
-   Returns {:ok? true} or {:ok? false :errors [...]}."
+   Returns {:ok? true} or {:ok? false :errors [...]}"
   [ev]
   (let [{:keys [required optional]} event-schema
         required-errors (->> required
@@ -171,3 +172,15 @@
 (defn event-seq
   "Return the ordered list of phases for this path." [{:keys [events]}]
   (map :phase events))
+
+(defn path->edn
+  "Serialize a path to EDN string." [path]
+  (pr-str path))
+
+(defn append-edn!
+  "Append a single EDN-encoded path to a file as one line.
+   Creates parent directories if needed. Returns the output path." [path out-file]
+  (let [file (io/file out-file)]
+    (io/make-parents file)
+    (spit file (str (path->edn path) "\n") :append true)
+    (.getPath file)))
