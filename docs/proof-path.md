@@ -24,6 +24,11 @@ Optional:
 - `:error`
 - `:evidence`
 
+## Validation
+
+- `validate-event` checks required fields and phase validity.
+- `validate-path` checks schema plus strict phase ordering.
+
 ## Module
 
 Implementation scaffold: `src/diag/proof_path.clj`.

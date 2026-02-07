@@ -18,6 +18,18 @@
 (def ^:private phase->index
   (zipmap proof-path-phases (range)))
 
+(def ^:private event-schema
+  "Minimal schema for a proof-path event. Keys are required unless noted." 
+  {:required {:path/id string?
+              :actor string?
+              :phase keyword?
+              :ts integer?}
+   :optional {:claim (constantly true)
+              :detail (constantly true)
+              :tx-id string?
+              :error map?
+              :evidence map?}})
+
 (defn- now-ms [] (System/currentTimeMillis))
 
 (defn- uuid [] (str (UUID/randomUUID)))
@@ -35,6 +47,29 @@
   {:path/id (uuid)
    :path/created-at (now-ms)
    :events []})
+
+(defn validate-event
+  "Validate event against the minimal schema.
+   Returns {:ok? true} or {:ok? false :errors [...]}."
+  [ev]
+  (let [{:keys [required optional]} event-schema
+        required-errors (->> required
+                             (keep (fn [[k pred]]
+                                     (when-not (pred (get ev k))
+                                       {:field k :reason :invalid-or-missing})))
+                             vec)
+        optional-errors (->> optional
+                             (keep (fn [[k pred]]
+                                     (when (contains? ev k)
+                                       (when-not (pred (get ev k))
+                                         {:field k :reason :invalid}))))
+                             vec)
+        phase-errors (when-not (valid-phase? (:phase ev))
+                       [{:field :phase :reason :invalid-phase}])
+        errors (vec (concat required-errors optional-errors (or phase-errors [])))]
+    (if (seq errors)
+      {:ok? false :errors errors}
+      {:ok? true})))
 
 (defn event
   "Build a proof-path event. Caller supplies :path/id and :actor.
@@ -96,6 +131,38 @@
 
       :else
       (update path :events conj ev))))
+
+(defn validate-path
+  "Validate a full path:
+   - each event passes schema
+   - event phases are strictly ordered
+   Returns {:ok? true} or {:ok? false :errors [...]}"
+  [{:keys [events] :as path}]
+  (if (nil? events)
+    {:ok? false :errors [{:field :events :reason :missing}]}
+    (let [event-errors (->> events
+                            (map-indexed
+                             (fn [idx ev]
+                               (let [res (validate-event ev)]
+                                 (when-not (:ok? res)
+                                   {:index idx :errors (:errors res)}))))
+                            (remove nil?)
+                            vec)
+          phase-errors (->> events
+                            (partition 2 1)
+                            (map-indexed
+                             (fn [idx [a b]]
+                               (when-not (next-phase? (:phase a) (:phase b))
+                                 {:index idx
+                                  :reason :invalid-phase-order
+                                  :from (:phase a)
+                                  :to (:phase b)})))
+                            (remove nil?)
+                            vec)
+          errors (vec (concat event-errors phase-errors))]
+      (if (seq errors)
+        {:ok? false :errors errors}
+        {:ok? true}))))
 
 (defn complete?
   "True when the path ends with :clock-out." [{:keys [events]}]
