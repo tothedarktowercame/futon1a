@@ -1,3 +1,3 @@
-(ns futon1a.test.layer2.placeholder-test)
+(ns futon1a.layer2.placeholder-test)
 
 (defn placeholder [] :ok)

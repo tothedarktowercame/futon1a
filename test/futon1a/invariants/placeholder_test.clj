@@ -1,3 +1,3 @@
-(ns futon1a.test.invariants.placeholder-test)
+(ns futon1a.invariants.placeholder-test)
 
 (defn placeholder [] :ok)

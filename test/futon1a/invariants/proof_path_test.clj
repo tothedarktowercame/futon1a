@@ -1,4 +1,4 @@
-(ns futon1a.test.invariants.proof-path-test
+(ns futon1a.invariants.proof-path-test
   (:require [clojure.test :refer [deftest is testing]]
             [futon1a.diag.proof-path :as proof]
             [futon1a.core.xtdb :as xt]))

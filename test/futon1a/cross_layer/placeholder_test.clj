@@ -1,3 +1,3 @@
-(ns futon1a.test.cross-layer.placeholder-test)
+(ns futon1a.cross-layer.placeholder-test)
 
 (defn placeholder [] :ok)

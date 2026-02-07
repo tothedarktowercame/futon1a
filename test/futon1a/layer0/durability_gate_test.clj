@@ -1,4 +1,4 @@
-(ns futon1a.test.layer0.durability-gate-test
+(ns futon1a.layer0.durability-gate-test
   (:require [clojure.test :refer [deftest is testing]]
             [futon1a.core.xtdb :as xt]
             [futon1a.diag.proof-path :as proof]))
@@ -29,12 +29,13 @@
                      :actor "tester"
                      :claim {:op :noop}
                      :detail {:layer 0}})))
-      (is (= "tx-noop" (:tx-id (xt/durable-write!
-                   {:store store
-                    :actor "tester"
-                    :claim {:op :noop}
-                    :detail {:layer 0}
-                    :allow-noop? true}))))))
+      (is (= "tx-noop"
+             (:tx-id (xt/durable-write!
+                      {:store store
+                       :actor "tester"
+                       :claim {:op :noop}
+                       :detail {:layer 0}
+                       :allow-noop? true})))))))
 
 (deftest durable-write-appends-proof-log
   (testing "durable write can append proof-path EDN"
