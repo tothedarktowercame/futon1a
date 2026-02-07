@@ -19,6 +19,22 @@
       (is (= "tx-1" (:tx-id result)))
       (is (:ok? (proof/validate-complete-path (:path result)))))))
 
+(deftest durable-write-requires-write-fn
+  (testing "nil write-fn is rejected unless allow-noop?"
+    (let [store (->TestStore "tx-3")]
+      (is (thrown? clojure.lang.ExceptionInfo
+                   (xt/durable-write!
+                    {:store store
+                     :actor "tester"
+                     :claim {:op :noop}
+                     :detail {:layer 0}})))
+      (is (:tx-id (xt/durable-write!
+                   {:store store
+                    :actor "tester"
+                    :claim {:op :noop}
+                    :detail {:layer 0}
+                    :allow-noop? true}))))))
+
 (deftest durable-write-appends-proof-log
   (testing "durable write can append proof-path EDN"
     (let [store (->TestStore "tx-2")

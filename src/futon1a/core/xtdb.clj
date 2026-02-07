@@ -25,10 +25,11 @@
    - claim (any)
    - detail (any)
    - write-fn (fn [] => side effects; should throw on failure)
+   - allow-noop? (boolean, optional) => allow nil write-fn
    - proof-log-path (string, optional) => append proof-path EDN line
 
    Returns {:tx-id <string> :path <proof-path>}"
-  [{:keys [store actor claim detail write-fn proof-log-path]}]
+  [{:keys [store actor claim detail write-fn allow-noop? proof-log-path]}]
   (let [path (proof/new-path)
         pid (:path/id path)
         ev #(proof/event {:path/id pid
@@ -42,6 +43,8 @@
                  (proof/append-event (ev :propose-claim))
                  (proof/append-event (ev :apply-change)))]
     (try
+      (when (and (nil? write-fn) (not allow-noop?))
+        (throw (ex-info "write-fn required" {:reason :missing-write-fn})))
       (when write-fn (write-fn))
       (let [path (proof/append-event path (ev :verify))
             path (proof/append-event path (ev :invariant-check))
