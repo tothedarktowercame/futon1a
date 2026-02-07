@@ -16,6 +16,9 @@ write gate. It is a stub until XTDB integration is added.
 - `:tx-id` (string)
 - `:path` (proof-path event log)
 
+If `:proof-log-path` is provided, the proof-path is appended as a single EDN
+line to the file.
+
 ## Errors
 
 Layer 0 failures surface as 503 with `:error/layer 0`.

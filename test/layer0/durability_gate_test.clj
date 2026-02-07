@@ -18,3 +18,17 @@
                    :write-fn (fn [] :ok)})]
       (is (= "tx-1" (:tx-id result)))
       (is (:ok? (proof/validate-complete-path (:path result)))))))
+
+(deftest durable-write-appends-proof-log
+  (testing "durable write can append proof-path EDN"
+    (let [store (->TestStore "tx-2")
+          tmp (java.io.File/createTempFile "futon1a-proof" ".edn")]
+      (.deleteOnExit tmp)
+      (xt/durable-write!
+       {:store store
+        :actor "tester"
+        :claim {:op :noop}
+        :detail {:layer 0}
+        :write-fn (fn [] :ok)
+        :proof-log-path (.getPath tmp)})
+      (is (re-find #":path/id" (slurp tmp))))))

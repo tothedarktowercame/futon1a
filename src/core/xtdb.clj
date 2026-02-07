@@ -25,9 +25,10 @@
    - claim (any)
    - detail (any)
    - write-fn (fn [] => side effects; should throw on failure)
+   - proof-log-path (string, optional) => append proof-path EDN line
 
    Returns {:tx-id <string> :path <proof-path>}"
-  [{:keys [store actor claim detail write-fn]}]
+  [{:keys [store actor claim detail write-fn proof-log-path]}]
   (let [path (proof/new-path)
         pid (:path/id path)
         ev #(proof/event {:path/id pid
@@ -53,7 +54,9 @@
                                                         :detail detail}))
             path (proof/append-event path (ev :clock-out))
             _ (when-not (:ok? (proof/validate-complete-path path))
-                (throw (ex-info "proof-path invalid" {:path path})))]
+                (throw (ex-info "proof-path invalid" {:path path})))
+            _ (when proof-log-path
+                (proof/append-edn! path proof-log-path))]
         {:tx-id tx-id
          :path path})
       (catch Throwable t
