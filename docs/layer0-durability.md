@@ -21,6 +21,9 @@ The result includes:
 If `:proof-log-path` is provided, the proof-path is appended as a single EDN
 line to the file.
 
+`durable-write-tx!` is a convenience wrapper that accepts a tx-ops vector
+directly and logs the proof-path in the same way.
+
 ## XTDB Adapter
 
 `src/futon1a/core/xtdb_node.clj` provides an XTDB-backed `DurableStore`

@@ -73,6 +73,24 @@
                                               {:message (.getMessage e)})}
                         e))))))
 
+(defn durable-write-tx!
+  "Convenience wrapper for a direct tx-ops vector.
+
+   Inputs:
+   - store, actor, claim, detail as in durable-write!
+   - tx-ops (vector)
+   - proof-log-path (optional)
+  "
+  [{:keys [store actor claim detail tx-ops proof-log-path]}]
+  (when-not (vector? tx-ops)
+    (throw (ex-info "tx-ops must be a vector" {:tx-ops tx-ops})))
+  (durable-write! {:store store
+                   :actor actor
+                   :claim claim
+                   :detail detail
+                   :write-fn (fn [] tx-ops)
+                   :proof-log-path proof-log-path}))
+
 (defrecord StubStore []
   DurableStore
   (submit-tx! [_ _] "tx-stub")

@@ -49,3 +49,14 @@
         :write-fn (fn [] [{:op :noop}])
         :proof-log-path (.getPath tmp)})
       (is (re-find #":path/id" (slurp tmp))))))
+
+(deftest durable-write-tx-wrapper
+  (testing "durable-write-tx! accepts tx-ops"
+    (let [store (->TestStore "tx-4")
+          result (xt/durable-write-tx!
+                  {:store store
+                   :actor "tester"
+                   :claim {:op :noop}
+                   :detail {:layer 0}
+                   :tx-ops [{:op :noop}]})]
+      (is (= "tx-4" (:tx-id result))))))
