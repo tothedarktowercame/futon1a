@@ -137,6 +137,78 @@
     (require-keys! {:node node} #{:node})
     (ok {:types (types/list-types node)})))
 
+(defn types-parent
+  "Override a type's parent.
+
+   Expects:
+   - node
+   - store
+   - penholder
+   - allowed-penholders
+   - type/id (keyword or string)
+   - type/kind (:entity/:relation/:intent)
+   - type/parent (keyword or string, or nil to clear)"
+  [{:keys [node store penholder allowed-penholders] :as req}]
+  (with-error-handling
+    (require-keys! req #{:node :store :penholder :allowed-penholders :type/id :type/kind})
+    (let [type-id (:type/id req)
+          kind (:type/kind req)
+          parent (:type/parent req)
+          tx-op (types/set-parent-tx {:node node
+                                      :kind kind
+                                      :type-id type-id
+                                      :parent parent})
+          result (pipeline/run-write!
+                  {:store store
+                   :penholder penholder
+                   :allowed-penholders allowed-penholders
+                   :model {:type/id type-id :type/kind kind}
+                   :required-keys #{:type/id :type/kind}
+                   :identity nil
+                   :tx-ops [tx-op]
+                   :claim {:op :types/parent}
+                   :detail {:type/id type-id :type/kind kind :type/parent parent}})]
+      (ok {:tx-id (:tx-id result)
+           :path/id (get-in result [:path :path/id])}))))
+
+(defn types-merge
+  "Merge aliases into a type doc.
+
+   Expects:
+   - node
+   - store
+   - penholder
+   - allowed-penholders
+   - type/id
+   - type/kind
+   - type/aliases (vector of keywords/strings)"
+  [{:keys [node store penholder allowed-penholders] :as req}]
+  (with-error-handling
+    (require-keys! req #{:node :store :penholder :allowed-penholders :type/id :type/kind :type/aliases})
+    (when-not (sequential? (:type/aliases req))
+      (throw (ex-info "type/aliases must be sequential"
+                      {:error (mv/layer4-error :invalid-type-aliases
+                                               {:type/aliases (:type/aliases req)})})))
+    (let [type-id (:type/id req)
+          kind (:type/kind req)
+          aliases (:type/aliases req)
+          tx-op (types/merge-aliases-tx {:node node
+                                         :kind kind
+                                         :type-id type-id
+                                         :aliases aliases})
+          result (pipeline/run-write!
+                  {:store store
+                   :penholder penholder
+                   :allowed-penholders allowed-penholders
+                   :model {:type/id type-id :type/kind kind}
+                   :required-keys #{:type/id :type/kind}
+                   :identity nil
+                   :tx-ops [tx-op]
+                   :claim {:op :types/merge}
+                   :detail {:type/id type-id :type/kind kind :type/aliases aliases}})]
+      (ok {:tx-id (:tx-id result)
+           :path/id (get-in result [:path :path/id])}))))
+
 (defn entity-by-id
   "Fetch an entity/doc by XTDB id.
 

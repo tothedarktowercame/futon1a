@@ -274,6 +274,14 @@
         (let [resp (routes/list-types {:node node})]
           (response req (:status resp) (:body resp)))
 
+        (and (= request-method :post) (= uri "/types/parent"))
+        (let [resp (routes/types-parent (merge base-req {:node node}))]
+          (response req (:status resp) (:body resp)))
+
+        (and (= request-method :post) (= uri "/types/merge"))
+        (let [resp (routes/types-merge (merge base-req {:node node}))]
+          (response req (:status resp) (:body resp)))
+
         (and (= request-method :post) (= uri "/__repair/legacy-descriptors"))
         ;; Explicit operational repair: upgrade migrated futon1 :model/descriptor docs
         ;; to satisfy Prototype 2 descriptor invariants.
