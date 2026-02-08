@@ -1,8 +1,16 @@
 {:deps {org.clojure/clojure {:mvn/version "1.11.1"}
-        com.xtdb/xtdb-core {:mvn/version "1.24.0"}}
+        com.xtdb/xtdb-core {:mvn/version "1.24.0"}
+        com.xtdb/xtdb-rocksdb {:mvn/version "1.24.0"}
+        cheshire/cheshire {:mvn/version "5.12.0"}
+        ring/ring-core {:mvn/version "1.12.1"}
+        ring/ring-jetty-adapter {:mvn/version "1.12.1"}}
  :paths ["src" "test"]
  :aliases {:test {:extra-deps {io.github.cognitect-labs/test-runner
                                {:git/tag "v0.5.1"
                                 :git/sha "dfb30dd"}}
                   :main-opts ["-m" "cognitect.test-runner"]
-                  :exec-fn cognitect.test-runner.api/test}}}
+                  :exec-fn cognitect.test-runner.api/test}
+
+           ;; Migration tooling needs to be able to read futon1's LMDB-backed XTDB.
+           ;; Keep it out of the default runtime classpath.
+           :migrate {:extra-deps {com.xtdb/xtdb-lmdb {:mvn/version "1.24.0"}}}}}
