@@ -17,6 +17,7 @@
             [futon1a.model.verify :as verify]
             [futon1a.scripts.repair :as repair]
             [futon1a.core.pipeline :as pipeline]
+            [futon1a.api.snapshot :as snapshot]
             [xtdb.api :as xtdb]))
 
 (defn ok
@@ -483,6 +484,78 @@
              :tx-id (:tx-id result)
              :path/id (get-in result [:path :path/id])})))))
 
+(declare normalize-type)
+
+(defn- sha256-hex
+  [^String s]
+  (let [md (java.security.MessageDigest/getInstance "SHA-256")
+        bytes (.digest md (.getBytes (or s "") "UTF-8"))]
+    (apply str (map (fn [b] (format "%02x" (bit-and b 0xff))) bytes))))
+
+(defn compat-upsert-hyperedge
+  "Futon4 arxana-store surface: POST /hyperedge (under /api/alpha or /api).
+
+  Payload (JSON or EDN):
+  {:type \"arxana/hyperedge\"?        ; optional entity type
+   :hx/type \"arxana/...\"            ; required
+   :hx/endpoints [\"entity-id\" ...]  ; required, non-nil ids
+   :props {...}?}
+  "
+  [{:keys [node store penholder allowed-penholders profile payload]}]
+  (with-error-handling
+    (require-keys! {:node node :store store :penholder penholder :allowed-penholders allowed-penholders}
+                   #{:node :store :penholder :allowed-penholders})
+    (require-keys! payload #{:hx/type :hx/endpoints})
+    (let [hx-type (:hx/type payload)
+          endpoints (vec (:hx/endpoints payload))
+          _ (when-not (and (or (keyword? hx-type) (string? hx-type))
+                           (sequential? endpoints)
+                           (seq endpoints)
+                           (every? some? endpoints))
+              (throw (ex-info "invalid hyperedge payload"
+                              {:error (mv/layer4-error :invalid-hyperedge
+                                                       {:expected {:hx/type :string-or-keyword
+                                                                   :hx/endpoints :non-empty-seq-non-nil}
+                                                        :got (select-keys payload [:hx/type :hx/endpoints])})})))
+          db (xtdb/db node)
+          _ (doseq [eid endpoints]
+              (when-not (xtdb/entity db (str eid))
+                (throw (ex-info "hyperedge endpoint missing"
+                                {:error (futon1a.core.invariants/layer2-error :missing-endpoint
+                                                                             {:missing (str eid)
+                                                                              :hx/type hx-type})}))))
+          hx-type-s (if (keyword? hx-type) (subs (str hx-type) 1) (str hx-type))
+          eid (or (some-> (:id payload) str not-empty)
+                  (some-> (:entity/id payload) str not-empty)
+                  (str "arxana/hyperedge/" hx-type-s "/" (sha256-hex (pr-str endpoints))))
+          etype (normalize-type (or (:type payload) "arxana/hyperedge"))
+          doc (cond-> {:xt/id eid
+                       :entity/id eid
+                       :entity/type etype
+                       :entity/name (or (:name payload) (str "hyperedge " hx-type-s))
+                       :hx/type hx-type-s
+                       :hx/endpoints (mapv str endpoints)}
+                (map? (:props payload)) (assoc :props (:props payload)))
+          result (pipeline/run-open-world!
+                  {:store store
+                   :penholder penholder
+                   :allowed-penholders allowed-penholders
+                   :entities [{:entity/id eid :entity/type etype}]
+                   :relations []
+                   :require-model? false
+                   :tx-ops [[:xtdb.api/put doc]]
+                   :claim {:op :compat/arxana-hyperedge}
+                   :detail {:hx/type hx-type-s
+                            :hx/endpoints (count endpoints)}})]
+      (ok {:profile (or profile "default")
+           :ok? true
+           :hyperedge {:id eid
+                       :type (subs (str etype) 1)
+                       :hx/type hx-type-s
+                       :hx/endpoints (mapv str endpoints)}
+           :tx-id (:tx-id result)
+           :path/id (get-in result [:path :path/id])}))))
+
 (defn- normalize-type
   [v]
   (cond
@@ -625,6 +698,50 @@
   (with-error-handling
     (require-keys! req #{:store :penholder :allowed-penholders :entities :relations :tx-ops})
     (ok (pipeline/run-open-world! req))))
+
+(defn snapshot-save
+  "Futon4 support: POST /snapshot (under /api/alpha or /api).
+
+   This writes a filesystem snapshot under the system's data-dir, not XTDB.
+
+   Expects:
+   - node
+   - data-dir
+   - scope (\"all\"|\"latest\")
+   - label (optional)"
+  [{:keys [node data-dir scope label] :as req}]
+  (with-error-handling
+    (require-keys! req #{:node :data-dir})
+    (ok (snapshot/export-graph-snapshot {:node node
+                                         :data-dir data-dir
+                                         :scope scope
+                                         :label label}))))
+
+(defn snapshot-restore
+  "Futon4 support: POST /snapshot/restore (under /api/alpha or /api).
+
+   Restore merges graph docs from a snapshot file into XTDB through the
+   open-world pipeline (preserving L0-L3 gates).
+
+   Expects:
+   - store
+   - penholder
+   - allowed-penholders
+   - data-dir
+   - scope (\"all\"|\"latest\")
+   - snapshot/id (optional; defaults to \"latest\" when scope=latest)"
+  [{:keys [store penholder allowed-penholders data-dir scope payload] :as req}]
+  (with-error-handling
+    (require-keys! req #{:store :penholder :allowed-penholders :data-dir})
+    (ok (snapshot/restore-graph-snapshot!
+         {:store store
+          :penholder penholder
+          :allowed-penholders allowed-penholders
+          :allowed-expansions (:allowed-expansions req)
+          :allowed-tooling (:allowed-tooling req)
+          :data-dir data-dir
+          :scope scope
+          :snapshot/id (or (:snapshot/id payload) (:snapshot/id req) (:snapshot/id (or payload {})))}))))
 
 (defn repair
   "Repair entities.

@@ -186,11 +186,12 @@
    system keys:
    - node (XTDB node)
    - store (DurableStore; typically from futon1a.core.xtdb-node/xtdb-store)
+   - data-dir (string; used for snapshot export/restore artifacts)
    - allowed-penholders (set of strings)
    - allowed-expansions (set, optional)
    - allowed-tooling (set, optional)
    - compat/penholder (string, optional) default penholder for Futon1-compat writes"
-  [{:keys [node store allowed-penholders allowed-expansions allowed-tooling] :as system}]
+  [{:keys [node store data-dir allowed-penholders allowed-expansions allowed-tooling] :as system}]
   (fn [req]
     (let [{:keys [request-method uri]} req
           body-map (when (#{:post :put :patch} request-method) (parse-body req))
@@ -323,6 +324,30 @@
                                                          :payload payload})]
           (response req (:status resp) (:body resp)))
 
+        ;; Futon4 arxana-store hyperedge surface.
+        (and (= request-method :post) alpha-uri (= alpha-uri "/hyperedge"))
+        (let [payload body-map
+              penholder (compat-penholder system req payload)
+              resp (routes/compat-upsert-hyperedge {:node node
+                                                    :store store
+                                                    :penholder penholder
+                                                    :allowed-penholders (or allowed-penholders #{})
+                                                    :profile (get-in req [:headers "x-profile"])
+                                                    :payload payload})]
+          (response req (:status resp) (:body resp)))
+
+        ;; /api alias for hyperedge.
+        (and (= request-method :post) api-uri (= api-uri "/hyperedge"))
+        (let [payload body-map
+              penholder (compat-penholder system req payload)
+              resp (routes/compat-upsert-hyperedge {:node node
+                                                    :store store
+                                                    :penholder penholder
+                                                    :allowed-penholders (or allowed-penholders #{})
+                                                    :profile (get-in req [:headers "x-profile"])
+                                                    :payload payload})]
+          (response req (:status resp) (:body resp)))
+
         ;; /api alias for batch relations.
         (and (= request-method :post) api-uri (= api-uri "/relations/batch"))
         (let [payload body-map
@@ -333,30 +358,6 @@
                                                          :allowed-penholders (or allowed-penholders #{})
                                                          :profile (get-in req [:headers "x-profile"])
                                                          :payload payload})]
-          (response req (:status resp) (:body resp)))
-
-        ;; Hyperedge write (futon1 parity — accepts both flat and rich endpoints)
-        (and (= request-method :post) (= uri "/api/alpha/hyperedge"))
-        (let [payload body-map
-              penholder (compat-penholder system req payload)
-              resp (routes/compat-upsert-hyperedge {:node node
-                                                    :store store
-                                                    :penholder penholder
-                                                    :allowed-penholders (or allowed-penholders #{})
-                                                    :profile (get-in req [:headers "x-profile"])
-                                                    :payload payload})]
-          (response req (:status resp) (:body resp)))
-
-        ;; /api alias for Arxana store bridge (futon4 targets /api/hyperedge).
-        (and (= request-method :post) api-uri (= api-uri "/hyperedge"))
-        (let [payload body-map
-              penholder (compat-penholder system req payload)
-              resp (routes/compat-upsert-hyperedge {:node node
-                                                    :store store
-                                                    :penholder penholder
-                                                    :allowed-penholders (or allowed-penholders #{})
-                                                    :profile (get-in req [:headers "x-profile"])
-                                                    :payload payload})]
           (response req (:status resp) (:body resp)))
 
         ;; Hyperedge read by ID
@@ -377,6 +378,49 @@
                      qend (routes/hyperedges-by-end {:node node :end-id qend :limit qlimit})
                      :else {:status 400
                             :body {:error "type or end parameter required"}})]
+          (response req (:status resp) (:body resp)))
+
+        ;; Futon4 snapshot surface (filesystem export + pipeline restore).
+        (and (= request-method :post) alpha-uri (= alpha-uri "/snapshot"))
+        (let [payload body-map
+              resp (routes/snapshot-save {:node node
+                                          :data-dir data-dir
+                                          :scope (:scope payload)
+                                          :label (:label payload)})]
+          (response req (:status resp) (:body resp)))
+
+        (and (= request-method :post) api-uri (= api-uri "/snapshot"))
+        (let [payload body-map
+              resp (routes/snapshot-save {:node node
+                                          :data-dir data-dir
+                                          :scope (:scope payload)
+                                          :label (:label payload)})]
+          (response req (:status resp) (:body resp)))
+
+        (and (= request-method :post) alpha-uri (= alpha-uri "/snapshot/restore"))
+        (let [payload body-map
+              penholder (compat-penholder system req payload)
+              resp (routes/snapshot-restore {:store store
+                                             :penholder penholder
+                                             :allowed-penholders (or allowed-penholders #{})
+                                             :allowed-expansions (or allowed-expansions #{})
+                                             :allowed-tooling (or allowed-tooling #{})
+                                             :data-dir data-dir
+                                             :scope (:scope payload)
+                                             :payload payload})]
+          (response req (:status resp) (:body resp)))
+
+        (and (= request-method :post) api-uri (= api-uri "/snapshot/restore"))
+        (let [payload body-map
+              penholder (compat-penholder system req payload)
+              resp (routes/snapshot-restore {:store store
+                                             :penholder penholder
+                                             :allowed-penholders (or allowed-penholders #{})
+                                             :allowed-expansions (or allowed-expansions #{})
+                                             :allowed-tooling (or allowed-tooling #{})
+                                             :data-dir data-dir
+                                             :scope (:scope payload)
+                                             :payload payload})]
           (response req (:status resp) (:body resp)))
 
         ;; Arxana media surface (expects /api prefix, not /api/alpha)

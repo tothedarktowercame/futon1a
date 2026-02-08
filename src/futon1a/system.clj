@@ -61,6 +61,7 @@
         store (xtnode/xtdb-store node)
         handler (-> (http-app/ring-handler {:node node
                                             :store store
+                                            :data-dir data-dir
                                             :allowed-penholders (or allowed-penholders #{})
                                             :allowed-expansions (or allowed-expansions #{})
                                             :allowed-tooling (or allowed-tooling #{})
