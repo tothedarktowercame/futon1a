@@ -34,7 +34,6 @@
   (->> (put-docs tx-ops)
        (map :xt/id)
        (keep identity)
-       (map str)
        (distinct)
        (vec)))
 
@@ -59,7 +58,8 @@
         (throw (ex-info "durable tx committed but entities not materialized"
                         {:error (layer0-error :postcommit-missing-entities
                                               {:tx-id tx-id
-                                               :missing missing
+                                               ;; Use readable stable forms (IDs may be UUIDs, not strings).
+                                               :missing (mapv pr-str missing)
                                                :expected (count ids)
                                                :observed (- (count ids) (count missing))})})))
       {:ok? true
