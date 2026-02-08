@@ -7,3 +7,10 @@
     (let [resp (h/health-report {:status :ok :counts {:entities 1}})]
       (is (= :ok (:status resp)))
       (is (= {:entities 1} (:counts resp))))))
+
+(deftest health-report-checks
+  (testing "health report derives status from checks"
+    (let [resp (h/health-report {:checks {:db (fn [] {:ok? true})
+                                          :mirror (fn [] {:ok? false :reason :stale})}})]
+      (is (= :degraded (:status resp)))
+      (is (false? (get-in resp [:checks :mirror :ok?]))))))

@@ -13,9 +13,21 @@
                     (:tx-id res)
                     res)]
       (str tx-id)))
-  (tx-sync! [_ _tx-id]
-    ;; XTDB v1 does not accept tx-id in sync; this waits for latest tx.
-    (xtdb/sync node)))
+  (tx-sync! [_ tx-id]
+    ;; Prefer await-tx when we can parse a tx-id, fall back to sync.
+    (let [{:keys [tx-id timeout-ms]} (if (map? tx-id) tx-id {:tx-id tx-id})
+          tx-id (cond
+                  (number? tx-id) tx-id
+                  (string? tx-id) (try
+                                    (Long/parseLong tx-id)
+                                    (catch Exception _ nil))
+                  :else nil)
+          timeout (when timeout-ms (java.time.Duration/ofMillis timeout-ms))]
+      (cond
+        (and tx-id timeout) (xtdb/await-tx node {:xtdb.api/tx-id tx-id} timeout)
+        tx-id (xtdb/await-tx node {:xtdb.api/tx-id tx-id})
+        timeout (xtdb/sync node timeout)
+        :else (xtdb/sync node)))))
 
 (defn start-node!
   "Start an XTDB node with the given config map." [config]
