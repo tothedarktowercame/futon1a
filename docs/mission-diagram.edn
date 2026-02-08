@@ -1,0 +1,126 @@
+;; Machine-checkable EDN equivalent of the mermaid diagram in
+;; M-futon1a-rebuild.md § Interface Signature.
+;;
+;; This is the ground truth for the futon1a rebuild mission wiring.
+;; The mermaid in the mission doc is the human-readable shadow of this.
+;;
+;; Annotations:
+;;   :timescale    — :fast, :medium, :slow, :glacial (Invariant I3)
+;;   :constraint   — true if this node is a preference/constraint (Invariant I4)
+
+{:mission/id :futon1a-rebuild
+ :mission/state :active
+
+ :ports
+ {:input
+  [{:id :I-futon1-data     :name "futon1 LMDB data"     :type :migration-data
+    :source "futon1 LMDB export" :note "17,564 documents"
+    :timescale :medium}     ; one-time batch migration
+
+   {:id :I-write-request   :name "write-request"         :type :http-request
+    :source "HTTP client"        :note "penholder + model + identity + tx-ops"
+    :timescale :fast}        ; per-request
+
+   {:id :I-ingest-batch    :name "ingest-batch"          :type :http-request
+    :source "bulk ingest client" :note "entities + relations"
+    :timescale :fast}        ; per-request
+
+   {:id :I-model-descriptor :name "model-descriptors"    :type :model-descriptor
+    :source "futon1 app/model*.clj" :note "6 domain model specifications"
+    :timescale :slow         ; configuration-time
+    :constraint true}]       ; ← PREFERENCE: defines what the system considers valid
+
+  :output
+  [{:id :O-http-api       :name "http-api"        :type :http-endpoint
+    :consumer "any HTTP client"  :spec-ref "2.6"
+    :timescale :fast}
+   {:id :O-meta-model-api :name "meta-model-api"  :type :http-endpoint
+    :consumer "self / agents"    :spec-ref "2.11.4"
+    :timescale :slow}
+   {:id :O-error-shape    :name "error-shape"     :type :error-response
+    :consumer "any HTTP client"  :spec-ref "2.6.5"
+    :timescale :fast}
+   {:id :O-proof-path     :name "proof-path"      :type :proof-path
+    :consumer "audit log"        :spec-ref "2.1"
+    :timescale :fast}
+   {:id :O-entity-read    :name "entity-read"     :type :http-endpoint
+    :consumer "any HTTP client"  :spec-ref "2.6.6"
+    :timescale :fast}
+   {:id :O-type-registry  :name "type-registry"   :type :type-registry
+    :consumer "self / agents"    :spec-ref "2.11.3"
+    :timescale :slow}
+   {:id :O-health-status  :name "health-status"   :type :http-endpoint
+    :consumer "ops / monitoring" :spec-ref "2.6"
+    :timescale :fast}]}
+
+ ;; Components are morphisms: :accepts (domain) and :produces (codomain)
+ ;; separate from :type (what the component *is*).
+ :components
+ [{:id :C-L4   :name "L4 Validation"    :type :clj-namespace :ref "model/validation.clj"
+   :accepts #{:http-request}             :produces #{:http-request :error-response}
+   :timescale :fast}
+  {:id :C-L3   :name "L3 Authorization" :type :clj-namespace :ref "auth/penholder.clj"
+   :accepts #{:http-request}             :produces #{:http-request :error-response}
+   :timescale :fast}
+  {:id :C-L2   :name "L2 Integrity"     :type :clj-namespace :ref "core/entity.clj"
+   :accepts #{:http-request}             :produces #{:http-request :error-response}
+   :timescale :fast}
+  {:id :C-L1   :name "L1 Identity"      :type :clj-namespace :ref "core/identity.clj"
+   :accepts #{:http-request}             :produces #{:http-request :error-response}
+   :timescale :fast}
+  {:id :C-L0   :name "L0 Durability"    :type :clj-namespace :ref "core/xtdb.clj"
+   :accepts #{:http-request :migration-data :xtdb-tx}
+   :produces #{:xtdb-tx :error-response :proof-path}
+   :timescale :fast}
+  {:id :C-XTDB :name "XTDB (RocksDB)"   :type :xtdb-node
+   :accepts #{:xtdb-tx}
+   :produces #{:xtdb-entity :http-endpoint :type-registry :model-descriptor}
+   :timescale :medium}      ; durable storage, slower than request handling
+  {:id :C-TR   :name "Type Registry"    :type :type-registry :ref "2.11.3"
+   :accepts #{:xtdb-entity :model-descriptor}
+   :produces #{:type-registry}
+   :timescale :slow}         ; configuration-time catalog
+  {:id :C-MR   :name "Model Registry"   :type :model-descriptor :ref "2.11.1"
+   :accepts #{:model-descriptor :xtdb-entity}
+   :produces #{:http-endpoint :model-descriptor}
+   :timescale :slow}         ; configuration-time catalog
+  {:id :C-PP   :name "Proof Path"       :type :proof-path :ref "2.1"
+   :accepts #{:proof-path}
+   :produces #{:proof-path}
+   :timescale :fast}]        ; emitted per-write
+
+ :edges
+ [;; Input → Component
+  {:from :I-write-request    :to :C-L4   :type :http-request}
+  {:from :I-ingest-batch     :to :C-L4   :type :http-request}
+  {:from :I-model-descriptor :to :C-MR   :type :model-descriptor}
+  {:from :I-futon1-data      :to :C-L0   :type :migration-data}
+
+  ;; Layer stack (sequential gates) — request flows down
+  {:from :C-L4 :to :C-L3 :type :http-request}
+  {:from :C-L3 :to :C-L2 :type :http-request}
+  {:from :C-L2 :to :C-L1 :type :http-request}
+  {:from :C-L1 :to :C-L0 :type :http-request}
+  {:from :C-L0 :to :C-XTDB :type :xtdb-tx}
+
+  ;; XTDB → auxiliary components
+  {:from :C-XTDB :to :C-TR   :type :xtdb-entity}
+  {:from :C-XTDB :to :C-MR   :type :xtdb-entity}
+
+  ;; L0 → proof path
+  {:from :C-L0 :to :C-PP :type :proof-path}
+
+  ;; Component → Output
+  {:from :C-XTDB :to :O-entity-read    :type :http-endpoint}
+  {:from :C-XTDB :to :O-http-api       :type :http-endpoint}
+  {:from :C-XTDB :to :O-health-status  :type :http-endpoint}
+  {:from :C-MR   :to :O-meta-model-api :type :http-endpoint}
+  {:from :C-TR   :to :O-type-registry  :type :type-registry}
+  {:from :C-PP   :to :O-proof-path     :type :proof-path}
+
+  ;; Error propagation — all layers can emit errors
+  {:from :C-L4 :to :O-error-shape :type :error-response}
+  {:from :C-L3 :to :O-error-shape :type :error-response}
+  {:from :C-L2 :to :O-error-shape :type :error-response}
+  {:from :C-L1 :to :O-error-shape :type :error-response}
+  {:from :C-L0 :to :O-error-shape :type :error-response}]}

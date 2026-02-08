@@ -201,7 +201,63 @@ the full git log.
 
 ---
 
-## 6. Tool Chain
+## 6. Mission Diagram Validation
+
+futon1a is the first mission to use machine-checkable architecture diagrams.
+The mermaid diagram in M-futon1a-rebuild.md is human-reviewable; the EDN in
+`docs/mission-diagram.edn` is the machine-checkable ground truth.
+
+### Why
+
+The futon1a rebuild demonstrated that specifying internal correctness
+(invariants, gates, proofs) without specifying boundary types produces systems
+that work internally but can't compose with anything. The mission diagram
+validator catches this class of error before humans have to.
+
+### What the validator checks
+
+| Check | What it catches |
+|-------|----------------|
+| **Completeness** | Output port with no path from any input |
+| **Coverage** | Internal component with no path to any output (dead code) |
+| **No orphan inputs** | Input port connected to nothing |
+| **Type safety** | Wire type incompatible with source `:produces` or dest `:accepts` |
+| **Spec coverage** | Output port missing `:spec-ref` (stop-the-line) |
+
+### How to validate
+
+```clojure
+;; From the futon5 repo:
+(require '[futon5.ct.mission :as m]
+         '[clojure.edn :as edn])
+
+(def spec (edn/read-string (slurp "../futon1a/docs/mission-diagram.edn")))
+(def diagram (m/mission-diagram spec))
+
+(m/validate diagram)
+;; => {:all-valid true, :checks [...], :mission/id :futon1a-rebuild}
+
+;; Regenerate mermaid from EDN (should match the mission doc):
+(println (m/diagram->mermaid diagram))
+```
+
+### Key insight: components are morphisms
+
+The first validation run against futon1a's diagram found 12 type errors.
+Components had a single `:type` field that confused "what it is" (e.g.,
+`:clj-namespace`) with "what it accepts/produces" (e.g., `:http-request` →
+`:error-response`). The fix: components declare `:accepts` (domain) and
+`:produces` (codomain), which is exactly what category theory says — a morphism
+is defined by its source and target objects, not by what it's made of.
+
+### When to update
+
+Update `docs/mission-diagram.edn` at every prototype gate. The validator
+should pass before the gate is considered met.
+
+---
+
+## 7. Tool Chain
 
 ```
 clj-kondo --lint src/ test/    # Lint before every commit
@@ -211,7 +267,7 @@ git log --oneline -10           # Check recent commit style
 
 ---
 
-## 7. File Layout Reference
+## 8. File Layout Reference
 
 ```
 src/futon1a/
