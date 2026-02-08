@@ -5,6 +5,7 @@ Minimal HTTP surface for futon1a.
 ## Endpoints
 
 - `GET /health` → `{status: "ok"}`
+- `POST /write` → `{tx-id: "..."}`
 
 ## Error Mapping
 
