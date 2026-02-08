@@ -442,6 +442,24 @@
                         normalized)
             docs (mapv :doc built)
             public (mapv :relation built)
+            ;; Open-world ingest requires endpoint entities be present in the request.
+            ;; For batch relation upserts, we derive them from store state.
+            endpoint-ids (->> docs
+                              (mapcat (fn [d] [(:relation/from d) (:relation/to d)]))
+                              (remove nil?)
+                              (map str)
+                              (distinct)
+                              (vec))
+            endpoint-docs (mapv (fn [eid]
+                                  (or (f1g/fetch-entity node eid)
+                                      (throw (ex-info "relation endpoint missing"
+                                                      {:error (futon1a.core.invariants/layer2-error :missing-endpoint
+                                                                              {:missing eid})}))))
+                                endpoint-ids)
+            entities (mapv (fn [d]
+                             {:entity/id (or (:entity/id d) (:xt/id d))
+                              :entity/type (or (:entity/type d) (:type d))})
+                           endpoint-docs)
             rel-descriptors (mapv (fn [doc]
                                     {:relation/id (:relation/id doc)
                                      :relation/type (:relation/type doc)
@@ -453,7 +471,7 @@
                     {:store store
                      :penholder penholder
                      :allowed-penholders allowed-penholders
-                     :entities []
+                     :entities entities
                      :relations rel-descriptors
                      :require-model? false
                      :tx-ops tx-ops
