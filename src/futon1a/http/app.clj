@@ -308,6 +308,30 @@
                                                    :payload payload})]
           (response req (:status resp) (:body resp)))
 
+        ;; Futon4 arxana-store batch relation surface (org link sync).
+        (and (= request-method :post) alpha-uri (= alpha-uri "/relations/batch"))
+        (let [payload body-map
+              penholder (compat-penholder system req payload)
+              resp (routes/compat-upsert-relations-batch {:node node
+                                                         :store store
+                                                         :penholder penholder
+                                                         :allowed-penholders (or allowed-penholders #{})
+                                                         :profile (get-in req [:headers "x-profile"])
+                                                         :payload payload})]
+          (response req (:status resp) (:body resp)))
+
+        ;; /api alias for batch relations.
+        (and (= request-method :post) api-uri (= api-uri "/relations/batch"))
+        (let [payload body-map
+              penholder (compat-penholder system req payload)
+              resp (routes/compat-upsert-relations-batch {:node node
+                                                         :store store
+                                                         :penholder penholder
+                                                         :allowed-penholders (or allowed-penholders #{})
+                                                         :profile (get-in req [:headers "x-profile"])
+                                                         :payload payload})]
+          (response req (:status resp) (:body resp)))
+
         ;; Arxana media surface (expects /api prefix, not /api/alpha)
         (and (= request-method :post) (= uri "/api/media/lyrics"))
         (let [payload body-map

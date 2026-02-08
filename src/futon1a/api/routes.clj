@@ -382,7 +382,15 @@
   (with-error-handling
     (require-keys! {:node node :store store :penholder penholder :allowed-penholders allowed-penholders} #{:node :store :penholder :allowed-penholders})
     (require-keys! payload #{:type :src :dst})
-    (let [{:keys [doc relation]} (f1w/upsert-relation-doc {:node node :payload payload})
+    (let [payload (if (and (map? (:props payload)) (nil? (:provenance payload)))
+                    ;; Futon4's arxana-store uses {:props {:label \"...\" ...}} for relations.
+                    ;; Normalize into Futon1-style provenance so downstream readers can
+                    ;; surface the label and extra props consistently.
+                    (let [props (:props payload)]
+                      (assoc payload :provenance {:note (get props :label)
+                                                  :props props}))
+                    payload)
+          {:keys [doc relation]} (f1w/upsert-relation-doc {:node node :payload payload})
           ;; Pipeline integrity check uses :relation/from/:relation/to, so include them in model.
           model (select-keys doc [:relation/id :relation/from :relation/to])
           result (pipeline/run-write!
@@ -399,6 +407,63 @@
            :relation relation
            :tx-id (:tx-id result)
            :path/id (get-in result [:path :path/id])}))))
+
+(defn compat-upsert-relations-batch
+  "Futon1 API compatibility: POST /relations/batch (under /api/alpha).
+
+  Accepts {:relations [<relation-payload> ...]} where each payload matches the
+  /relation shape (as used by futon4's arxana-store).
+  Writes all relations in one XTDB transaction."
+  [{:keys [node store penholder allowed-penholders profile payload]}]
+  (with-error-handling
+    (require-keys! {:node node :store store :penholder penholder :allowed-penholders allowed-penholders} #{:node :store :penholder :allowed-penholders})
+    (require-keys! payload #{:relations})
+    (let [rels (:relations payload)]
+      (when-not (and (sequential? rels) (seq rels))
+        (throw (ex-info "relations must be a non-empty list"
+                        {:error (mv/layer4-error :invalid-relations-batch
+                                                 {:expected :non-empty-seq
+                                                  :got (type rels)})})))
+      (let [normalized (mapv (fn [r]
+                               (when-not (map? r)
+                                 (throw (ex-info "relation must be a map"
+                                                 {:error (mv/layer4-error :invalid-relations-batch
+                                                                          {:expected :map
+                                                                           :got (type r)})})))
+                               (cond
+                                 (and (map? (:props r)) (nil? (:provenance r)))
+                                 (assoc r :provenance {:note (get (:props r) :label)
+                                                       :props (:props r)})
+                                 :else r))
+                             rels)
+            built (mapv (fn [r]
+                          (require-keys! r #{:type :src :dst})
+                          (f1w/upsert-relation-doc {:node node :payload r}))
+                        normalized)
+            docs (mapv :doc built)
+            public (mapv :relation built)
+            rel-descriptors (mapv (fn [doc]
+                                    {:relation/id (:relation/id doc)
+                                     :relation/type (:relation/type doc)
+                                     :relation/from (:relation/from doc)
+                                     :relation/to (:relation/to doc)})
+                                  docs)
+            tx-ops (mapv (fn [d] [:xtdb.api/put d]) docs)
+            result (pipeline/run-open-world!
+                    {:store store
+                     :penholder penholder
+                     :allowed-penholders allowed-penholders
+                     :entities []
+                     :relations rel-descriptors
+                     :require-model? false
+                     :tx-ops tx-ops
+                     :claim {:op :compat/futon1-relations-batch}
+                     :detail {:count (count docs)}})]
+        (ok {:profile (or profile "default")
+             :count (count public)
+             :relations public
+             :tx-id (:tx-id result)
+             :path/id (get-in result [:path :path/id])})))))
 
 (defn- normalize-type
   [v]
