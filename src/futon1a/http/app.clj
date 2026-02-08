@@ -271,6 +271,24 @@
         (let [resp (routes/list-types {:node node})]
           (response req (:status resp) (:body resp)))
 
+        (and (= request-method :post) (= uri "/__repair/legacy-descriptors"))
+        ;; Explicit operational repair: upgrade migrated futon1 :model/descriptor docs
+        ;; to satisfy Prototype 2 descriptor invariants.
+        (let [dry-run? (boolean (:dry-run? body-map))
+              ph (compat-penholder system req body-map)]
+          (try
+            (require 'futon1a.scripts.repair-legacy-descriptors)
+            (let [repair! (resolve 'futon1a.scripts.repair-legacy-descriptors/repair!)
+                  result (repair! {:node node
+                                   :store store
+                                   :penholder ph
+                                   :allowed-penholders (or allowed-penholders #{})
+                                   :dry-run? dry-run?})]
+              (response req 200 result))
+            (catch Exception e
+              (response req 500 {:error {:reason :exception
+                                         :message (.getMessage e)}}))))
+
         (and (= request-method :post) (= uri "/ingest"))
         (let [resp (routes/ingest base-req)]
           (response req (:status resp) (:body resp)))
