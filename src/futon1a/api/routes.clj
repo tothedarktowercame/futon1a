@@ -5,8 +5,11 @@
    Theory:   futon-theory/error-hierarchy (all handlers use with-error-handling)"
   (:require [futon1a.api.errors :as errors]
             [futon1a.diag.health :as health]
+            [futon1a.model.descriptor-store :as dstore]
             [futon1a.model.registry :as registry]
+            [futon1a.model.type-registry :as types]
             [futon1a.model.validation :as mv]
+            [futon1a.model.verify :as verify]
             [futon1a.scripts.repair :as repair]
             [futon1a.core.pipeline :as pipeline]))
 
@@ -85,6 +88,52 @@
   "List all registered model ids."
   []
   (ok {:models (vec (registry/list-models))}))
+
+(defn meta-model
+  "Fetch a model descriptor by scope from XTDB.
+
+   Expects:
+   - node
+   - scope (keyword or string)"
+  [{:keys [node scope]}]
+  (with-error-handling
+    (require-keys! {:node node :scope scope} #{:node :scope})
+    (if-let [doc (dstore/get-descriptor node scope)]
+      (ok doc)
+      {:status 404
+       :body {:error {:reason :not-found
+                      :scope scope}}})))
+
+(defn meta-models
+  "List all model descriptors from XTDB.
+
+   Expects:
+   - node"
+  [{:keys [node]}]
+  (with-error-handling
+    (require-keys! {:node node} #{:node})
+    (ok {:descriptors (dstore/list-descriptors node)})))
+
+(defn meta-model-verify
+  "Verify a descriptor's invariants against live XTDB data.
+
+   Expects:
+   - node
+   - scope"
+  [{:keys [node scope]}]
+  (with-error-handling
+    (require-keys! {:node node :scope scope} #{:node :scope})
+    (ok (verify/verify-scope node scope))))
+
+(defn list-types
+  "List all registered type docs from XTDB.
+
+   Expects:
+   - node"
+  [{:keys [node]}]
+  (with-error-handling
+    (require-keys! {:node node} #{:node})
+    (ok {:types (types/list-types node)})))
 
 (defn ingest
   "Ingest open-world data.

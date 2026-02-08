@@ -34,6 +34,20 @@
       (is (= 200 (:status resp)))
       (is (= [:person] (:models (:body resp)))))))
 
+(deftest model-registry-accepts-rich-descriptor
+  (testing "register accepts Prototype 2 descriptor shape"
+    (let [desc {:model/scope :meta-model
+                :schema/version "0.1.0"
+                :schema/certificate {:penholder "tester" :issued-at 0}
+                :entities {:model/descriptor {:required [:model/scope]
+                                              :id-strategy :custom}}
+                :operations {}
+                :stores {:canonical :xtdb}
+                :invariants [:meta/descriptor-has-certificate]}
+          resp (routes/register-model {:id :meta-model :descriptor desc})]
+      (is (= 200 (:status resp)))
+      (is (= :meta-model (get-in resp [:body :id]))))))
+
 (deftest ingest-endpoint
   (testing "ingest validates required fields"
     (let [resp (routes/ingest {:entities []})]

@@ -12,8 +12,17 @@
             [futon1a.core.identity :as id]
             [futon1a.core.xtdb :as xt]
             [futon1a.ingest.open-world :as open-world]
+            [futon1a.model.type-registry :as types]
             [futon1a.model.expansion :as expansion]
             [futon1a.model.validation :as mv]))
+
+(defn- tx-ops->docs
+  [tx-ops]
+  (->> tx-ops
+       (keep (fn [op]
+               (when (and (vector? op) (= :xtdb.api/put (first op)) (map? (second op)))
+                 (second op))))
+       (vec)))
 
 (defn run-write!
   "Run a write through Layers 4 → 0.
@@ -57,7 +66,10 @@
   (when identity
     (id/validate-identity identity))
   ;; Layer 0 — durable write (503)
-  (let [{:keys [tx-id path]} (xt/durable-write-tx!
+  (let [docs (tx-ops->docs tx-ops)
+        type-ops (types/tx-ops-for-docs docs)
+        tx-ops (into (vec type-ops) tx-ops)
+        {:keys [tx-id path]} (xt/durable-write-tx!
                               {:store store
                                :actor penholder
                                :claim (or claim {:op :write})
@@ -103,6 +115,9 @@
   (let [ingest (open-world/ingest! {:entities entities
                                     :relations relations
                                     :require-model? require-model?})
+        docs (tx-ops->docs tx-ops)
+        type-ops (types/tx-ops-for-docs docs)
+        tx-ops (into (vec type-ops) tx-ops)
         {:keys [tx-id path]} (xt/durable-write-tx!
                               {:store store
                                :actor penholder

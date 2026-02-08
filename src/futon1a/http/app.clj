@@ -250,6 +250,27 @@
         (let [resp (routes/list-models)]
           (response req (:status resp) (:body resp)))
 
+        (and (= request-method :get) (= uri "/meta/model"))
+        (let [resp (routes/meta-models {:node node})]
+          (response req (:status resp) (:body resp)))
+
+        (and (= request-method :get) (str/starts-with? uri "/meta/model/"))
+        (let [scope (subs uri (count "/meta/model/"))
+              ;; Handle /meta/model/<scope>/verify.
+              verify? (str/ends-with? scope "/verify")
+              scope (if verify?
+                      (subs scope 0 (- (count scope) (count "/verify")))
+                      scope)
+              scope (if (str/starts-with? scope ":") scope (str ":" scope))
+              resp (if verify?
+                     (routes/meta-model-verify {:node node :scope scope})
+                     (routes/meta-model {:node node :scope scope}))]
+          (response req (:status resp) (:body resp)))
+
+        (and (= request-method :get) (= uri "/types"))
+        (let [resp (routes/list-types {:node node})]
+          (response req (:status resp) (:body resp)))
+
         (and (= request-method :post) (= uri "/ingest"))
         (let [resp (routes/ingest base-req)]
           (response req (:status resp) (:body resp)))
