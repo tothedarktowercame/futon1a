@@ -7,6 +7,8 @@
             [futon1a.core.entity :as ent]
             [futon1a.core.identity :as id]
             [futon1a.core.xtdb :as xt]
+            [futon1a.ingest.open-world :as open-world]
+            [futon1a.model.expansion :as expansion]
             [futon1a.model.validation :as mv]))
 
 (defn run-write!
@@ -24,15 +26,24 @@
 
    Returns {:ok? true :tx-id <string> :path <proof-path>} or throws.
   "
-  [{:keys [store penholder allowed-penholders model required-keys identity tx-ops claim detail]}]
+  [{:keys [store penholder allowed-penholders model required-keys identity tx-ops claim detail
+           expansion allowed-expansions tooling allowed-tooling]}]
   ;; Layer 4 — model validation (400)
+  (expansion/expansion-gate! {:expansion expansion
+                              :allowed-expansions (or allowed-expansions #{})})
   (mv/validate-model! {:model model :required-keys (or required-keys #{})})
   (when-not (vector? tx-ops)
     (throw (ex-info "tx-ops required"
                     {:error (mv/layer4-error :missing-tx-ops
                                              {:tx-ops tx-ops})})))
   ;; Layer 3 — authorization (403)
-  (auth/authorize! {:penholder penholder :allowed-penholders allowed-penholders})
+  (if tooling
+    (auth/authorize-tooling! {:penholder penholder
+                              :allowed-penholders allowed-penholders
+                              :tooling-id (:tooling-id tooling)
+                              :allowed-tooling allowed-tooling})
+    (auth/authorize! {:penholder penholder
+                      :allowed-penholders allowed-penholders}))
   ;; Layer 2 — entity/relation integrity (500)
   (when (or (:entity/id model) (:entity/type model))
     (ent/validate-entity model))
@@ -49,5 +60,52 @@
                                :detail (or detail {:layer :pipeline})
                                :tx-ops tx-ops})]
     {:ok? true
+     :tx-id tx-id
+     :path path}))
+
+(defn run-open-world!
+  "Run an open-world ingest through L3 → L2 → L0, with optional L4 model enforcement.
+
+   Inputs:
+   - store
+   - penholder
+   - allowed-penholders (set)
+   - tooling (map, optional)
+   - allowed-tooling (set, optional)
+   - entities (vector)
+   - relations (vector)
+   - require-model? (boolean, optional)
+   - tx-ops (vector)
+   - claim, detail (any)
+
+   Returns {:ok? true :counts {...} :tx-id <string> :path <proof-path>} or throws.
+  "
+  [{:keys [store penholder allowed-penholders tooling allowed-tooling
+           entities relations require-model? tx-ops claim detail
+           expansion allowed-expansions]}]
+  (expansion/expansion-gate! {:expansion expansion
+                              :allowed-expansions (or allowed-expansions #{})})
+  (when-not (vector? tx-ops)
+    (throw (ex-info "tx-ops required"
+                    {:error (mv/layer4-error :missing-tx-ops
+                                             {:tx-ops tx-ops})})))
+  (if tooling
+    (auth/authorize-tooling! {:penholder penholder
+                              :allowed-penholders allowed-penholders
+                              :tooling-id (:tooling-id tooling)
+                              :allowed-tooling allowed-tooling})
+    (auth/authorize! {:penholder penholder
+                      :allowed-penholders allowed-penholders}))
+  (let [ingest (open-world/ingest! {:entities entities
+                                    :relations relations
+                                    :require-model? require-model?})
+        {:keys [tx-id path]} (xt/durable-write-tx!
+                              {:store store
+                               :actor penholder
+                               :claim (or claim {:op :ingest})
+                               :detail (or detail {:layer :ingest})
+                               :tx-ops tx-ops})]
+    {:ok? true
+     :counts (:counts ingest)
      :tx-id tx-id
      :path path}))

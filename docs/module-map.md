@@ -26,6 +26,8 @@ This module map operationalizes the mission's Pattern → Code mapping and estab
 | `src/futon1a/api/errors.clj` | Error mapping to layers | `storage/error-layer-hierarchy` |
 | `src/futon1a/api/routes.clj` | HTTP API surface | `storage/canonical-interface` |
 | `src/futon1a/model/registry.clj` | Model/schema registry | `storage/schema-evolution-stability` |
+| `src/futon1a/model/migration.clj` | Schema migrations | `storage/schema-evolution-stability` |
+| `src/futon1a/model/expansion.clj` | Expansion gating | `storage/determinism-vs-expansion` |
 | `src/futon1a/scripts/repair.clj` | Repair/backfill tools | `storage/invariants-vs-repair` |
 | `src/futon1a/diag/proof_path.clj` | Proof-path event logging | `futon-theory/proof-path`, `futon-theory/event-protocol` |
 
@@ -46,6 +48,8 @@ This module map operationalizes the mission's Pattern → Code mapping and estab
 | `test/futon1a/diag` | Health diagnostics tests |
 | `test/futon1a/ingest` | Open-world ingest tests |
 | `test/futon1a/model` | Registry tests |
+| `test/futon1a/model/migration_test.clj` | Migration tests |
+| `test/futon1a/layer4/expansion_test.clj` | Expansion gate tests |
 | `test/futon1a/scripts` | Repair tooling tests |
 | `test/futon1a/integration` | XTDB integration tests |
 

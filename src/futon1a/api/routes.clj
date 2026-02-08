@@ -2,7 +2,6 @@
   "Minimal API surface for futon1a."
   (:require [futon1a.api.errors :as errors]
             [futon1a.diag.health :as health]
-            [futon1a.ingest.open-world :as open-world]
             [futon1a.model.registry :as registry]
             [futon1a.model.validation :as mv]
             [futon1a.scripts.repair :as repair]
@@ -88,13 +87,16 @@
   "Ingest open-world data.
 
    Expects:
+   - store
+   - penholder
+   - allowed-penholders
    - entities (vector)
    - relations (vector)
    - require-model? (optional)"
   [req]
   (with-error-handling
-    (require-keys! req #{:entities :relations})
-    (ok (open-world/ingest! req))))
+    (require-keys! req #{:store :penholder :allowed-penholders :entities :relations :tx-ops})
+    (ok (pipeline/run-open-world! req))))
 
 (defn repair
   "Repair entities.

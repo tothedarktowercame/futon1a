@@ -27,6 +27,18 @@
                               :tx-ops [{:op :noop}]})]
       (is (= 400 (:status resp))))))
 
+(deftest write-expansion-gate
+  (testing "expansion forbidden returns 400"
+    (let [resp (routes/write {:store (->TestStore "tx")
+                              :penholder "alice"
+                              :allowed-penholders #{"alice"}
+                              :model {:id 1}
+                              :required-keys #{:id}
+                              :expansion {:feature :beta}
+                              :allowed-expansions #{:alpha}
+                              :tx-ops [{:op :noop}]})]
+      (is (= 400 (:status resp))))))
+
 (deftest write-success
   (testing "valid write returns tx-id and path/id"
     (let [resp (routes/write {:store (->TestStore "tx-ok")
@@ -38,3 +50,27 @@
       (is (= 200 (:status resp)))
       (is (= "tx-ok" (get-in resp [:body :tx-id])))
       (is (string? (get-in resp [:body :path/id]))))))
+
+(deftest write-tooling-guard
+  (testing "tooling requires allowlist"
+    (let [resp (routes/write {:store (->TestStore "tx-ok")
+                              :penholder "alice"
+                              :allowed-penholders #{"alice"}
+                              :tooling {:tooling-id "cli"}
+                              :allowed-tooling #{"ops"}
+                              :model {:id 1}
+                              :required-keys #{:id}
+                              :tx-ops [{:op :noop}]})]
+      (is (= 403 (:status resp))))))
+
+(deftest write-tooling-allowed
+  (testing "tooling passes with allowlist"
+    (let [resp (routes/write {:store (->TestStore "tx-ok")
+                              :penholder "alice"
+                              :allowed-penholders #{"alice"}
+                              :tooling {:tooling-id "cli"}
+                              :allowed-tooling #{"cli"}
+                              :model {:id 1}
+                              :required-keys #{:id}
+                              :tx-ops [{:op :noop}]})]
+      (is (= 200 (:status resp))))))

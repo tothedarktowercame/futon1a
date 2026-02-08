@@ -8,7 +8,7 @@ Minimal HTTP surface for futon1a.
 - `POST /write` → `{:tx-id "..."}`
 - `POST /models` → register model descriptor
 - `GET /models` → list model ids
-- `POST /ingest` → open-world ingest
+- `POST /ingest` → open-world ingest (requires `store`, `penholder`, `allowed-penholders`, `tx-ops`)
 - `POST /repair` → repair entities
 - `POST /repair/verify` → verify repair outcomes
 

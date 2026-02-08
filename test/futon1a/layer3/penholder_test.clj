@@ -32,3 +32,28 @@
     (is (thrown? clojure.lang.ExceptionInfo
                  (ph/authorize! {:penholder "alice"
                                  :allowed-penholders #{}})))))
+
+(deftest authorize-tooling-requires-tooling-id
+  (testing "tooling id is required"
+    (is (thrown? clojure.lang.ExceptionInfo
+                 (ph/authorize-tooling! {:penholder "alice"
+                                         :allowed-penholders #{"alice"}
+                                         :tooling-id nil
+                                         :allowed-tooling #{"cli"}})))))
+
+(deftest authorize-tooling-forbids-unknown
+  (testing "tooling id must be in allowlist"
+    (is (thrown? clojure.lang.ExceptionInfo
+                 (ph/authorize-tooling! {:penholder "alice"
+                                         :allowed-penholders #{"alice"}
+                                         :tooling-id "unknown"
+                                         :allowed-tooling #{"cli"}})))))
+
+(deftest authorize-tooling-accepts-known
+  (testing "known tooling passes"
+    (let [res (ph/authorize-tooling! {:penholder "alice"
+                                      :allowed-penholders #{"alice"}
+                                      :tooling-id "cli"
+                                      :allowed-tooling #{"cli"}})]
+      (is (:ok? res))
+      (is (= "cli" (:tooling-id res))))))

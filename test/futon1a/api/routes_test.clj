@@ -1,7 +1,13 @@
 (ns futon1a.api.routes-test
   (:require [clojure.test :refer [deftest is testing use-fixtures]]
             [futon1a.api.routes :as routes]
+            [futon1a.core.xtdb :as xt]
             [futon1a.model.registry :as registry]))
+
+(defrecord TestStore [tx]
+  xt/DurableStore
+  (submit-tx! [_ _] tx)
+  (tx-sync! [_ _] true))
 
 (use-fixtures :each (fn [f] (registry/clear-registry!) (f)))
 
@@ -32,9 +38,21 @@
   (testing "ingest validates required fields"
     (let [resp (routes/ingest {:entities []})]
       (is (= 400 (:status resp)))))
+  (testing "ingest enforces penholder"
+    (let [resp (routes/ingest {:store (->TestStore "tx")
+                               :penholder "eve"
+                               :allowed-penholders #{"alice"}
+                               :entities [{:entity/id "e1" :entity/type :foo}]
+                               :relations []
+                               :tx-ops [{:op :noop}]})]
+      (is (= 403 (:status resp)))))
   (testing "ingest returns counts"
-    (let [resp (routes/ingest {:entities [{:entity/id "e1" :entity/type :foo}]
-                               :relations []})]
+    (let [resp (routes/ingest {:store (->TestStore "tx")
+                               :penholder "alice"
+                               :allowed-penholders #{"alice"}
+                               :entities [{:entity/id "e1" :entity/type :foo}]
+                               :relations []
+                               :tx-ops [{:op :noop}]})]
       (is (= 200 (:status resp)))
       (is (= 1 (get-in resp [:body :counts :entities]))))))
 
