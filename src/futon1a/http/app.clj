@@ -112,6 +112,21 @@
       (let [rest (subs uri (count prefix))]
         (if (seq rest) rest "/")))))
 
+(defn- api-strip
+  "If `uri` is under /api (but not /api/alpha), return the stripped path
+  (starting with /). Otherwise returns nil.
+
+  Arxana's `arxana-store` normalizes its base URL to end in /api, then uses
+  paths like /entity/<id> and /relation; that yields requests like
+  /api/entity/<id> which must be supported for futon1a replacement mode."
+  [uri]
+  (let [prefix "/api"]
+    (when (and (string? uri)
+               (str/starts-with? uri prefix)
+               (not (str/starts-with? uri "/api/alpha")))
+      (let [rest (subs uri (count prefix))]
+        (if (seq rest) rest "/")))))
+
 (defn- ego-name-from-uri
   "Extract name from `/ego/<name>`."
   [uri]
@@ -179,6 +194,7 @@
           query-params (when (= request-method :get)
                          (codec/form-decode (or (:query-string req) "")))
           alpha-uri (alpha-strip uri)
+          api-uri (api-strip uri)
           base-req (merge body-map
                           {:store store
                            :allowed-penholders (or allowed-penholders #{})
@@ -257,7 +273,31 @@
                                                  :payload payload})]
           (response req (:status resp) (:body resp)))
 
+        ;; /api alias for Arxana store bridge (arxana-store normalizes base to /api).
+        (and (= request-method :post) api-uri (= api-uri "/entity"))
+        (let [payload body-map
+              penholder (compat-penholder system req payload)
+              resp (routes/compat-ensure-entity {:node node
+                                                 :store store
+                                                 :penholder penholder
+                                                 :allowed-penholders (or allowed-penholders #{})
+                                                 :profile (get-in req [:headers "x-profile"])
+                                                 :payload payload})]
+          (response req (:status resp) (:body resp)))
+
         (and (= request-method :post) (= uri "/api/alpha/relation"))
+        (let [payload body-map
+              penholder (compat-penholder system req payload)
+              resp (routes/compat-upsert-relation {:node node
+                                                   :store store
+                                                   :penholder penholder
+                                                   :allowed-penholders (or allowed-penholders #{})
+                                                   :profile (get-in req [:headers "x-profile"])
+                                                   :payload payload})]
+          (response req (:status resp) (:body resp)))
+
+        ;; /api alias for Arxana store bridge.
+        (and (= request-method :post) api-uri (= api-uri "/relation"))
         (let [payload body-map
               penholder (compat-penholder system req payload)
               resp (routes/compat-upsert-relation {:node node
@@ -320,8 +360,23 @@
               resp (routes/entity-by-external {:node node :source src :external-id ext})]
           (response req (:status resp) (:body resp)))
 
+        ;; /api alias for external-id lookup.
+        (and (= request-method :get) api-uri (= api-uri "/entity"))
+        (let [src (get query-params "source")
+              ext (get query-params "external-id")
+              resp (routes/entity-by-external {:node node :source src :external-id ext})]
+          (response req (:status resp) (:body resp)))
+
         (and (= request-method :get) alpha-uri (str/starts-with? alpha-uri "/entity/"))
         (let [eid (some-> (entity-id-from-uri alpha-uri) url-decode)
+              resp (routes/compat-entity {:node node
+                                         :profile (get-in req [:headers "x-profile"])
+                                         :id eid})]
+          (response req (:status resp) (:body resp)))
+
+        ;; /api alias for entity reads.
+        (and (= request-method :get) api-uri (str/starts-with? api-uri "/entity/"))
+        (let [eid (some-> (entity-id-from-uri api-uri) url-decode)
               resp (routes/compat-entity {:node node
                                          :profile (get-in req [:headers "x-profile"])
                                          :id eid})]
