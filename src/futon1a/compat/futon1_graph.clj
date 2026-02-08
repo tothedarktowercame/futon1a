@@ -39,7 +39,11 @@
                                                                          :entity/external-id :entity/source]))))))
 
 (defn fetch-entity
-  "Fetch entity by XTDB id, falling back to lookup by :entity/name when missing."
+  "Fetch entity by XTDB id, falling back to lookup by :entity/name and then
+  :entity/external-id when missing.
+
+  Rationale: callers in the Futon1 ecosystem often address entities by name or
+  external-id (not only by :xt/id)."
   [node id-or-name]
   (let [db (xtdb/db node)
         direct (when (seq (str id-or-name)) (xtdb/entity db id-or-name))]
@@ -52,7 +56,22 @@
                                           :where [[e :entity/name name]]}
                                        id-or-name)
                              (map first)
-                             (keep :entity/id)
+                             (map (fn [m] (or (:entity/id m) (:xt/id m))))
+                             (keep identity)
+                             (map str)
+                             (sort)
+                             (vec))]
+            (when-let [eid (first matches)]
+              (xtdb/entity db eid))))
+        (when (seq (str id-or-name))
+          ;; External-id fallback: used by Arxana lyrics ids (string external ids).
+          (let [matches (->> (xtdb/q db '{:find [(pull e [:xt/id :entity/id])]
+                                          :in [external]
+                                          :where [[e :entity/external-id external]]}
+                                       id-or-name)
+                             (map first)
+                             (map (fn [m] (or (:entity/id m) (:xt/id m))))
+                             (keep identity)
                              (map str)
                              (sort)
                              (vec))]

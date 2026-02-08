@@ -3,7 +3,8 @@
 
    Pattern:  storage/canonical-interface
    Theory:   futon-theory/error-hierarchy (all handlers use with-error-handling)"
-  (:require [futon1a.api.errors :as errors]
+  (:require [clojure.string :as str]
+            [futon1a.api.errors :as errors]
             [futon1a.compat.futon1-graph :as f1g]
             [futon1a.compat.futon1-model :as f1m]
             [futon1a.compat.futon1-write :as f1w]
@@ -398,6 +399,133 @@
            :relation relation
            :tx-id (:tx-id result)
            :path/id (get-in result [:path :path/id])}))))
+
+(defn- normalize-type
+  [v]
+  (cond
+    (keyword? v) v
+    (string? v) (let [s (-> v str str/trim)
+                      s (if (str/starts-with? s ":") (subs s 1) s)]
+                  (when (seq s) (keyword s)))
+    :else nil))
+
+(defn- nonblank-str [v]
+  (let [s (when (some? v) (str v))
+        s (some-> s str/trim)]
+    (when (seq s) s)))
+
+(defn- sha-from-id
+  [id]
+  (when-let [s (nonblank-str id)]
+    (when (str/includes? s "/")
+      (last (clojure.string/split s #"/")))))
+
+(defn upsert-media-lyrics
+  "Arxana media surface: upsert lyrics (and optionally track + relation).
+
+  Endpoint lives at:
+  - POST /api/media/lyrics
+  - POST /api/alpha/media/lyrics
+
+  Payload (EDN or JSON):
+  {:track {...}?
+   :lyrics {:id \"arxana/media-lyrics/...\" :name ... :type ... :source ... :media/sha256 ...}
+   :relation {...}?}
+  "
+  [{:keys [store penholder allowed-penholders payload profile]}]
+  (with-error-handling
+    (require-keys! {:store store :penholder penholder :allowed-penholders allowed-penholders :payload payload}
+                   #{:store :penholder :allowed-penholders :payload})
+    (require-keys! payload #{:lyrics})
+    (let [{:keys [track lyrics relation]} payload
+          lyrics-id (or (nonblank-str (:id lyrics))
+                        (nonblank-str (:entity/id lyrics))
+                        (nonblank-str (:external-id lyrics))
+                        (nonblank-str (:entity/external-id lyrics))
+                        (nonblank-str (:name lyrics)))
+          lyrics-type (normalize-type (or (:type lyrics) (:entity/type lyrics)))
+          lyrics-name (nonblank-str (:name lyrics))
+          lyrics-src (or (nonblank-str (:source lyrics))
+                         (nonblank-str (:entity/source lyrics)))
+          lyrics-sha (or (nonblank-str (:media/sha256 lyrics))
+                         (sha-from-id lyrics-id))
+          _ (when-not (and lyrics-id (= :arxana/media-lyrics lyrics-type) lyrics-src lyrics-sha)
+              (throw (ex-info "invalid lyrics payload"
+                              {:error (mv/layer4-error :invalid-media-lyrics
+                                                       {:expected {:lyrics/type :arxana/media-lyrics
+                                                                   :lyrics/id :nonblank
+                                                                   :lyrics/source :nonblank
+                                                                   :lyrics/media.sha256 :nonblank}
+                                                        :got {:lyrics/id lyrics-id
+                                                              :lyrics/type lyrics-type
+                                                              :lyrics/source (boolean lyrics-src)
+                                                              :lyrics/media/sha256 lyrics-sha}})})))
+          lyrics-doc {:xt/id lyrics-id
+                      :entity/id lyrics-id
+                      :entity/type :arxana/media-lyrics
+                      :entity/name (or lyrics-name (str lyrics-id))
+                      :entity/external-id lyrics-id
+                      :entity/source lyrics-src
+                      :media/sha256 lyrics-sha}
+          track-id (or (nonblank-str (:id track))
+                       (nonblank-str (:entity/id track))
+                       (nonblank-str (:external-id track))
+                       (nonblank-str (:entity/external-id track))
+                       (nonblank-str (:name track)))
+          track-type (normalize-type (or (:type track) (:entity/type track)))
+          track-name (nonblank-str (:name track))
+          track-doc (when track-id
+                      {:xt/id track-id
+                       :entity/id track-id
+                       :entity/type (or track-type :arxana/media-track)
+                       :entity/name (or track-name (str track-id))
+                       :entity/external-id track-id})
+          rel-type (normalize-type (or (:type relation) (:relation/type relation) :media/lyrics))
+          rel-id (or (nonblank-str (:id relation))
+                     (nonblank-str (:relation/id relation))
+                     (when (and track-id lyrics-id)
+                       (str "rel|" track-id "|" (subs (str rel-type) 1) "|" lyrics-id)))
+          rel-doc (when (and track-id lyrics-id rel-id)
+                    {:xt/id rel-id
+                     :relation/id rel-id
+                     :relation/type rel-type
+                     :relation/from track-id
+                     :relation/to lyrics-id
+                     :relation/src track-id
+                     :relation/dst lyrics-id
+                     :relation/provenance (when (map? (:provenance relation)) (:provenance relation))
+                     :relation/confidence (:confidence relation)
+                     :relation/last-seen (:last-seen relation)})
+          docs (cond-> [lyrics-doc]
+                 track-doc (conj track-doc)
+                 rel-doc (conj rel-doc))
+          entities (->> docs
+                        (filter :entity/id)
+                        (mapv (fn [d] {:entity/id (:entity/id d) :entity/type (:entity/type d)})))
+          relations (if rel-doc
+                      [{:relation/id (:relation/id rel-doc)
+                        :relation/type (:relation/type rel-doc)
+                        :relation/from (:relation/from rel-doc)
+                        :relation/to (:relation/to rel-doc)}]
+                      [])
+          tx-ops (mapv (fn [d] [:xtdb.api/put d]) docs)
+          result (pipeline/run-open-world!
+                  {:store store
+                   :penholder penholder
+                   :allowed-penholders allowed-penholders
+                   :entities entities
+                   :relations relations
+                   :require-model? false
+                   :tx-ops tx-ops
+                   :claim {:op :media/lyrics-upsert}
+                   :detail {:lyrics/id lyrics-id
+                            :track/id track-id
+                            :relation/id rel-id}})]
+      (ok {:profile (or profile "default")
+           :counts (:counts result)
+           :tx-id (:tx-id result)
+           :path/id (get-in result [:path :path/id])
+           :lyrics {:id lyrics-id}}))))
 
 (defn ingest
   "Ingest open-world data.

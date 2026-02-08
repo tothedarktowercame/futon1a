@@ -268,6 +268,28 @@
                                                    :payload payload})]
           (response req (:status resp) (:body resp)))
 
+        ;; Arxana media surface (expects /api prefix, not /api/alpha)
+        (and (= request-method :post) (= uri "/api/media/lyrics"))
+        (let [payload body-map
+              penholder (compat-penholder system req payload)
+              resp (routes/upsert-media-lyrics {:store store
+                                                :penholder penholder
+                                                :allowed-penholders (or allowed-penholders #{})
+                                                :profile (get-in req [:headers "x-profile"])
+                                                :payload payload})]
+          (response req (:status resp) (:body resp)))
+
+        ;; Accept the same surface under /api/alpha for parity/testing.
+        (and (= request-method :post) alpha-uri (= alpha-uri "/media/lyrics"))
+        (let [payload body-map
+              penholder (compat-penholder system req payload)
+              resp (routes/upsert-media-lyrics {:store store
+                                                :penholder penholder
+                                                :allowed-penholders (or allowed-penholders #{})
+                                                :profile (get-in req [:headers "x-profile"])
+                                                :payload payload})]
+          (response req (:status resp) (:body resp)))
+
         (and (= request-method :post) (= uri "/api/alpha/lab/session"))
         (try
           (let [body body-map
@@ -407,6 +429,26 @@
                                    :allowed-penholders (or allowed-penholders #{})
                                    :dry-run? dry-run?})]
               (response req 200 result))
+            (catch Exception e
+              (response req 500 {:error {:reason :exception
+                                         :message (.getMessage e)}}))))
+
+        (and (= request-method :post) (= uri "/__repair/import-futon1-events-lyrics"))
+        ;; Explicit operational migration: import lyrics from Futon1 durable event log.
+        (let [dry-run? (boolean (:dry-run? body-map))
+              ph (compat-penholder system req body-map)
+              events-path (or (:events-path body-map) (:path body-map))]
+          (try
+            (require 'futon1a.scripts.import-futon1-events-lyrics)
+            (let [import! (resolve 'futon1a.scripts.import-futon1-events-lyrics/import!)
+                  result (import! {:store store
+                                   :penholder ph
+                                   :allowed-penholders (or allowed-penholders #{})
+                                   :dry-run? dry-run?
+                                   :events-path events-path})]
+              (response req 200 result))
+            (catch clojure.lang.ExceptionInfo e
+              (response req (or (:status (ex-data e)) 400) {:error (.getMessage e) :data (ex-data e)}))
             (catch Exception e
               (response req 500 {:error {:reason :exception
                                          :message (.getMessage e)}}))))
