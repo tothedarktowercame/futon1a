@@ -1,11 +1,16 @@
-# API Surface (Stub)
+# API Surface
 
 Minimal HTTP surface for futon1a.
 
 ## Endpoints
 
-- `GET /health` → `{status: "ok"}`
-- `POST /write` → `{tx-id: "..."}`
+- `GET /health` → `{:status :ok|:degraded, :counts {...}, :checks {...}}`
+- `POST /write` → `{:tx-id "..."}`
+- `POST /models` → register model descriptor
+- `GET /models` → list model ids
+- `POST /ingest` → open-world ingest
+- `POST /repair` → repair entities
+- `POST /repair/verify` → verify repair outcomes
 
 ## Error Mapping
 
