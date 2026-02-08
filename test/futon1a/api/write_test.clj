@@ -6,7 +6,8 @@
 (defrecord TestStore [tx]
   xt/DurableStore
   (submit-tx! [_ _] tx)
-  (tx-sync! [_ _] true))
+  (tx-sync! [_ _] true)
+  (entity [_ _] nil))
 
 (deftest write-requires-penholder
   (testing "missing penholder returns 403"

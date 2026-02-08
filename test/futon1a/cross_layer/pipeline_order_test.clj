@@ -6,7 +6,8 @@
 (defrecord TestStore [tx]
   xt/DurableStore
   (submit-tx! [_ _] tx)
-  (tx-sync! [_ _] true))
+  (tx-sync! [_ _] true)
+  (entity [_ _] nil))
 
 (deftest pipeline-orders-layer4-before-layer3
   (testing "L4 model validation wins over L3 auth"

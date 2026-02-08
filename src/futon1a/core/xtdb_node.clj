@@ -20,7 +20,9 @@
                    (try (Long/parseLong tx-id) (catch NumberFormatException _ nil)))]
       (if parsed
         (xtdb/await-tx node {:xtdb.api/tx-id parsed})
-        (xtdb/sync node)))))
+        (xtdb/sync node))))
+  (entity [_ id]
+    (xtdb/entity (xtdb/db node) id)))
 
 (defn start-node!
   "Start an XTDB node with the given config map." [config]

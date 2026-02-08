@@ -3,7 +3,8 @@
 
    Enforces UUID identity and unique external-id mapping before write."
   (:require [clojure.string :as str])
-  (:import (java.util UUID)))
+  (:import (java.net URLEncoder)
+           (java.util UUID)))
 
 (defn layer1-error
   "Build a Layer 1 error map." [reason context]
@@ -23,6 +24,36 @@
   [s]
   (let [v (when (string? s) (str/trim s))]
     (when (seq v) v)))
+
+(defn normalize-source
+  [s]
+  (let [v (when (string? s) (str/trim s))]
+    (when (seq v) v)))
+
+(defn external-index-id
+  "Canonical XTDB id for an external identity mapping doc.
+
+   This is the durable lookup key for GET /entity?source=...&external-id=....
+  "
+  [{:keys [source external-id]}]
+  (let [src (normalize-source source)
+        ext (normalize-external-id external-id)]
+    (when (and src ext)
+      (str "identity/external|"
+           (URLEncoder/encode src "UTF-8")
+           "|"
+           (URLEncoder/encode ext "UTF-8")))))
+
+(defn external-index-doc
+  [{:keys [source external-id entity-id]}]
+  (let [src (normalize-source source)
+        ext (normalize-external-id external-id)]
+    (when (and src ext entity-id)
+      {:xt/id (external-index-id {:source src :external-id ext})
+       :futon1a/doc :identity/external
+       :identity/source src
+       :identity/external-id ext
+       :identity/entity-id (str entity-id)})))
 
 (defn validate-identity
   "Validate identity inputs and uniqueness.

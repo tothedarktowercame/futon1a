@@ -6,7 +6,8 @@
 (defrecord TestStore [tx]
   xt/DurableStore
   (submit-tx! [_ _] tx)
-  (tx-sync! [_ _] true))
+  (tx-sync! [_ _] true)
+  (entity [_ _] nil))
 
 (deftest durable-write-produces-proof-path
   (testing "durable write emits complete proof-path"

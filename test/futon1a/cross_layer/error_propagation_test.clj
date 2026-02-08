@@ -6,12 +6,14 @@
 (defrecord OkStore [tx]
   xt/DurableStore
   (submit-tx! [_ _] tx)
-  (tx-sync! [_ _] true))
+  (tx-sync! [_ _] true)
+  (entity [_ _] nil))
 
 (defrecord FailingStore []
   xt/DurableStore
   (submit-tx! [_ _] (throw (ex-info "boom" {:cause :submit})))
-  (tx-sync! [_ _] true))
+  (tx-sync! [_ _] true)
+  (entity [_ _] nil))
 
 (deftest error-propagation-layer4
   (testing "L4 validation errors propagate to response"

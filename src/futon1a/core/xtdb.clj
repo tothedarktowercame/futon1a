@@ -8,7 +8,8 @@
 
 (defprotocol DurableStore
   (submit-tx! [store tx-ops] "Submit tx ops; returns tx-id string.")
-  (tx-sync! [store tx-id] "Block until durable commit confirmed for tx-id."))
+  (tx-sync! [store tx-id] "Block until durable commit confirmed for tx-id.")
+  (entity [store id] "Read an entity/doc by id from the durable store."))
 
 (defn layer0-error
   "Build a Layer 0 error map." [reason context]
@@ -98,4 +99,5 @@
 (defrecord StubStore []
   DurableStore
   (submit-tx! [_ _] "tx-stub")
-  (tx-sync! [_ _] true))
+  (tx-sync! [_ _] true)
+  (entity [_ _] nil))

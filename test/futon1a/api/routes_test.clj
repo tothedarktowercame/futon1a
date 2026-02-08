@@ -7,7 +7,8 @@
 (defrecord TestStore [tx]
   xt/DurableStore
   (submit-tx! [_ _] tx)
-  (tx-sync! [_ _] true))
+  (tx-sync! [_ _] true)
+  (entity [_ _] nil))
 
 (use-fixtures :each (fn [f] (registry/clear-registry!) (f)))
 

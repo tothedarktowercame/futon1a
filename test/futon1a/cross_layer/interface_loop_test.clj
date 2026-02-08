@@ -6,12 +6,14 @@
 (defrecord OkStore [tx]
   xt/DurableStore
   (submit-tx! [_ _] tx)
-  (tx-sync! [_ _] true))
+  (tx-sync! [_ _] true)
+  (entity [_ _] nil))
 
 (defrecord FailingStore []
   xt/DurableStore
   (submit-tx! [_ _] (throw (ex-info "boom" {:cause :submit})))
-  (tx-sync! [_ _] true))
+  (tx-sync! [_ _] true)
+  (entity [_ _] nil))
 
 (deftest interface-loop-error-contexts
   (testing "L4 provides field context"

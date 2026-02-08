@@ -14,6 +14,7 @@
             [clojure.string :as str]
             [cheshire.core :as json]
             [futon1a.api.routes :as routes]
+            [ring.util.codec :as codec]
             [ring.util.response :as resp]
             [xtdb.api :as xtdb]))
 
@@ -151,6 +152,8 @@
   (fn [req]
     (let [{:keys [request-method uri]} req
           body-map (when (#{:post :put :patch} request-method) (parse-body req))
+          query-params (when (= request-method :get)
+                         (codec/form-decode (or (:query-string req) "")))
           base-req (merge body-map
                           {:store store
                            :allowed-penholders (or allowed-penholders #{})
@@ -301,13 +304,16 @@
         (let [resp (routes/verify-repair base-req)]
           (response req (:status resp) (:body resp)))
 
+        (and (= request-method :get) (= uri "/entity"))
+        (let [src (get query-params "source")
+              ext (get query-params "external-id")
+              resp (routes/entity-by-external {:node node :source src :external-id ext})]
+          (response req (:status resp) (:body resp)))
+
         (and (= request-method :get) (str/starts-with? uri "/entity/"))
         (let [eid (entity-id-from-uri uri)
-              db (xtdb/db node)
-              ent (when (seq eid) (xtdb/entity db eid))]
-          (if ent
-            (response req 200 {:entity ent})
-            (response req 404 {:error {:reason :not-found :entity/id eid}})))
+              resp (routes/entity-by-id {:node node :id eid})]
+          (response req (:status resp) (:body resp)))
 
         (= request-method :get)
         (not-found req)

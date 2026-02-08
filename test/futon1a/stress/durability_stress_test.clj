@@ -124,7 +124,8 @@
     (str "tx-" (swap! counter inc)))
   (tx-sync! [_ _]
     (Thread/sleep latency-ms)
-    true))
+    true)
+  (entity [_ _] nil))
 
 (deftest concurrent-durable-write-with-contention
   (testing "N concurrent writes with simulated tx-sync! latency"
