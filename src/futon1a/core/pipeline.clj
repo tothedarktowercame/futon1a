@@ -68,7 +68,7 @@
      :path path}))
 
 (defn run-open-world!
-  "Run an open-world ingest through L3 → L2 → L0, with optional L4 model enforcement.
+  "Run an open-world ingest through L4 → L3 → L2 → L0.
 
    Inputs:
    - store

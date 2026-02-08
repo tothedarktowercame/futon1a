@@ -95,6 +95,7 @@
    - allowed-penholders
    - entities (vector)
    - relations (vector)
+   - tx-ops (vector)
    - require-model? (optional)"
   [req]
   (with-error-handling
