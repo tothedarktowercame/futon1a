@@ -1,5 +1,8 @@
 (ns futon1a.ingest.open-world
-  "Open-world ingest."
+  "Open-world ingest with validation.
+
+   Tension:  Open-world velocity vs validation (T4).
+   Pattern:  storage/open-world-velocity-validation"
   (:require [futon1a.core.entity :as ent]
             [futon1a.model.registry :as registry]
             [futon1a.model.validation :as mv]))

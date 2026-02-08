@@ -2,7 +2,11 @@
   "Cross-layer write pipeline.
 
    Executes gates in strict layer order: L4 → L3 → L2 → L1 → L0.
-   If layer N fails, layers below N never run."
+   If layer N fails, layers below N never run.
+
+   Invariant: I3 (Hierarchy — errors surface at the layer that caused them).
+   Pattern:   storage/error-layer-hierarchy
+   Theory:    futon-theory/error-hierarchy, futon-theory/stop-the-line"
   (:require [futon1a.auth.penholder :as auth]
             [futon1a.core.entity :as ent]
             [futon1a.core.identity :as id]

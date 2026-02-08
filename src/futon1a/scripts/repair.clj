@@ -1,5 +1,8 @@
 (ns futon1a.scripts.repair
-  "Repair/backfill tools."
+  "Repair/backfill tools.
+
+   Tension:  Invariant enforcement vs operational repair (T7).
+   Pattern:  storage/invariants-vs-repair"
   (:require [futon1a.core.invariants :as inv]))
 
 (defn repair-entities!

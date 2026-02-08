@@ -1,5 +1,9 @@
 (ns futon1a.core.invariants
-  "Cross-layer invariant helpers (counter-ratchet scaffold)." )
+  "Cross-layer invariant helpers (counter-ratchet scaffold).
+
+   Invariant: I2 (Integrity — startup succeeds completely or fails loudly).
+   Pattern:   storage/invariants-vs-repair
+   Theory:    futon-theory/counter-ratchet")
 
 (defn layer2-error
   [reason context]

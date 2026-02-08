@@ -1,5 +1,9 @@
 (ns futon1a.core.entity
-  "Layer 2 entity/relation integrity checks."
+  "Layer 2 entity/relation integrity checks.
+
+   Invariant: I2 (Integrity — startup succeeds completely or fails loudly).
+   Pattern:   storage/graph-memory-contract
+   Theory:    futon-theory/all-or-nothing"
   (:require [futon1a.core.invariants :as inv]))
 
 (defn- ensure-id

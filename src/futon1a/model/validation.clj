@@ -1,5 +1,9 @@
 (ns futon1a.model.validation
-  "Layer 4 model validation gate.")
+  "Layer 4 model validation gate.
+
+   Invariant: I3 (Hierarchy — errors surface at the layer that caused them).
+   Pattern:   storage/schema-evolution-stability
+   Theory:    futon-theory/error-hierarchy")
 
 (defn layer4-error
   [reason context]

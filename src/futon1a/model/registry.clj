@@ -1,5 +1,8 @@
 (ns futon1a.model.registry
-  "Model registry."
+  "Model/schema registry.
+
+   Tension:  Schema evolution vs contract stability (T8).
+   Pattern:  storage/schema-evolution-stability"
   (:require [clojure.set :as set]))
 
 (defonce registry (atom {}))

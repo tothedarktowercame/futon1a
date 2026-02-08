@@ -1,5 +1,8 @@
 (ns futon1a.api.routes
-  "Minimal API surface for futon1a."
+  "Minimal API surface for futon1a.
+
+   Pattern:  storage/canonical-interface
+   Theory:   futon-theory/error-hierarchy (all handlers use with-error-handling)"
   (:require [futon1a.api.errors :as errors]
             [futon1a.diag.health :as health]
             [futon1a.model.registry :as registry]

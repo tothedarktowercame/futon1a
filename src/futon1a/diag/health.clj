@@ -1,5 +1,9 @@
 (ns futon1a.diag.health
-  "Health and diagnostics.")
+  "Health and diagnostics.
+
+   Invariant: I4 (Rapid Debugging — any bug diagnosable in under 10 minutes).
+   Pattern:   storage/rapid-debugging
+   Theory:    futon-theory/rapid-debugging")
 
 (defn- run-checks
   [checks]

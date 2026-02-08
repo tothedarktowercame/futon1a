@@ -1,5 +1,9 @@
 (ns futon1a.auth.penholder
-  "Layer 3 authorization gate (penholder enforcement)."
+  "Layer 3 authorization gate (penholder enforcement).
+
+   Invariant: I3 (Hierarchy — errors surface at the layer that caused them).
+   Pattern:   storage/guardrails-vs-tooling
+   Theory:    futon-theory/error-hierarchy, futon-theory/stop-the-line"
   (:require [clojure.string :as str]))
 
 (defn layer3-error

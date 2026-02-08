@@ -1,5 +1,9 @@
 (ns futon1a.api.errors
-  "Map layer error maps to HTTP response shapes.")
+  "Map layer error maps to HTTP response shapes.
+
+   Invariant: I3 (Hierarchy), I4 (Rapid Debugging).
+   Pattern:   storage/error-layer-hierarchy
+   Theory:    futon-theory/error-hierarchy")
 
 (defn error->response
   "Convert an {:error {...}} map into a HTTP response map.

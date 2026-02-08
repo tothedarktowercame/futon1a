@@ -1,5 +1,8 @@
 (ns futon1a.core.mirror
-  "Datascript ↔ XTDB mirroring (stub)."
+  "Datascript ↔ XTDB mirroring (stub).
+
+   Tension:  Mirroring speed vs consistency (T5).
+   Pattern:  storage/persistence-speed-mirroring"
   (:require [futon1a.core.invariants :as inv]))
 
 (defprotocol MirrorStore
