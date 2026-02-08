@@ -26,12 +26,14 @@
           type (or (normalize-type (:entity/type doc))
                    (normalize-type (:type doc)))
           external-id (or (:entity/external-id doc) (:external-id doc))
-          source (or (:entity/source doc) (:source doc))]
+          source (or (:entity/source doc) (:source doc))
+          sha (or (:media/sha256 doc) (:entity/media.sha256 doc))]
       (cond-> {:id id
                :name name
                :type type}
         (some? external-id) (assoc :external-id external-id)
         (some? source) (assoc :source source)
+        (some? sha) (assoc :media/sha256 sha)
         ;; include raw for debugging when values are missing
         (or (nil? id) (nil? name) (nil? type)) (assoc :_raw (select-keys doc
                                                                         [:xt/id :id :name :type
