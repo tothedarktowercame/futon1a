@@ -18,6 +18,15 @@
             [ring.util.response :as resp]
             [xtdb.api :as xtdb]))
 
+(defn- url-decode
+  "Decode a URL-encoded path segment."
+  [s]
+  (when (string? s)
+    (try
+      (java.net.URLDecoder/decode s "UTF-8")
+      (catch Exception _
+        s))))
+
 (defn- edn-response
   ([m] (edn-response 200 m))
   ([status m]
@@ -94,6 +103,21 @@
   (when (and (string? uri) (str/starts-with? uri "/entity/"))
     (subs uri (count "/entity/"))))
 
+(defn- alpha-strip
+  "If `uri` is under /api/alpha, return the stripped path (starting with /).
+   Otherwise returns nil."
+  [uri]
+  (let [prefix "/api/alpha"]
+    (when (and (string? uri) (str/starts-with? uri prefix))
+      (let [rest (subs uri (count prefix))]
+        (if (seq rest) rest "/")))))
+
+(defn- ego-name-from-uri
+  "Extract name from `/ego/<name>`."
+  [uri]
+  (when (and (string? uri) (str/starts-with? uri "/ego/"))
+    (subs uri (count "/ego/"))))
+
 (defn- alpha-lab-session-id-from-uri
   "Extract session id from `/api/alpha/lab/session/<id>`."
   [uri]
@@ -154,6 +178,7 @@
           body-map (when (#{:post :put :patch} request-method) (parse-body req))
           query-params (when (= request-method :get)
                          (codec/form-decode (or (:query-string req) "")))
+          alpha-uri (alpha-strip uri)
           base-req (merge body-map
                           {:store store
                            :allowed-penholders (or allowed-penholders #{})
@@ -181,9 +206,8 @@
         (let [resp (routes/write base-req)]
           (response req (:status resp) (:body resp)))
 
-        ;; Futon1-compat endpoints (JSON surface)
-        (and (= request-method :post) (or (= uri "/entity")
-                                          (= uri "/api/alpha/entity")))
+        ;; Futon3 bridge endpoints (minimal JSON surface)
+        (and (= request-method :post) (= uri "/entity"))
         (try
           (let [body body-map
                 _ (require-field req body :name)
@@ -201,8 +225,7 @@
           (catch clojure.lang.ExceptionInfo e
             (response req (or (:status (ex-data e)) 400) {:error (.getMessage e) :data (ex-data e)})))
 
-        (and (= request-method :post) (or (= uri "/relation")
-                                          (= uri "/api/alpha/relation")))
+        (and (= request-method :post) (= uri "/relation"))
         (try
           (let [body body-map
                 _ (require-field req body :type)
@@ -221,6 +244,29 @@
             (response req (:status resp) (:body resp)))
           (catch clojure.lang.ExceptionInfo e
             (response req (or (:status (ex-data e)) 400) {:error (.getMessage e) :data (ex-data e)})))
+
+        ;; Futon1 API parity writes (used by futon3 scripts like scripts/pattern_sync.clj)
+        (and (= request-method :post) (= uri "/api/alpha/entity"))
+        (let [payload body-map
+              penholder (compat-penholder system req payload)
+              resp (routes/compat-ensure-entity {:node node
+                                                 :store store
+                                                 :penholder penholder
+                                                 :allowed-penholders (or allowed-penholders #{})
+                                                 :profile (get-in req [:headers "x-profile"])
+                                                 :payload payload})]
+          (response req (:status resp) (:body resp)))
+
+        (and (= request-method :post) (= uri "/api/alpha/relation"))
+        (let [payload body-map
+              penholder (compat-penholder system req payload)
+              resp (routes/compat-upsert-relation {:node node
+                                                   :store store
+                                                   :penholder penholder
+                                                   :allowed-penholders (or allowed-penholders #{})
+                                                   :profile (get-in req [:headers "x-profile"])
+                                                   :payload payload})]
+          (response req (:status resp) (:body resp)))
 
         (and (= request-method :post) (= uri "/api/alpha/lab/session"))
         (try
@@ -244,6 +290,71 @@
           (if doc
             (response req 200 doc)
             (response req 404 {:error "not found" :lab/session-id sid})))
+
+        ;; Futon1 API parity endpoints (read surface used by futon3)
+        (and (= request-method :get) alpha-uri (= alpha-uri "/entity"))
+        (let [src (get query-params "source")
+              ext (get query-params "external-id")
+              resp (routes/entity-by-external {:node node :source src :external-id ext})]
+          (response req (:status resp) (:body resp)))
+
+        (and (= request-method :get) alpha-uri (str/starts-with? alpha-uri "/entity/"))
+        (let [eid (some-> (entity-id-from-uri alpha-uri) url-decode)
+              resp (routes/compat-entity {:node node
+                                         :profile (get-in req [:headers "x-profile"])
+                                         :id eid})]
+          (response req (:status resp) (:body resp)))
+
+        (and (= request-method :get) alpha-uri (= alpha-uri "/entities/latest"))
+        (let [type (get query-params "type")
+              limit (some-> (get query-params "limit") (Long/parseLong))
+              resp (routes/compat-entities-latest {:node node
+                                                  :profile (get-in req [:headers "x-profile"])
+                                                  :type type
+                                                  :limit limit})]
+          (response req (:status resp) (:body resp)))
+
+        (and (= request-method :get) alpha-uri (str/starts-with? alpha-uri "/ego/"))
+        (let [name (some-> (ego-name-from-uri alpha-uri) url-decode)
+              resp (routes/compat-ego {:node node
+                                      :profile (get-in req [:headers "x-profile"])
+                                      :name name})]
+          (response req (:status resp) (:body resp)))
+
+        (and (= request-method :get) alpha-uri (= alpha-uri "/meta/model"))
+        (let [resp (routes/compat-meta-model {:node node
+                                              :profile (get-in req [:headers "x-profile"])
+                                              :scope :patterns})]
+          (response req (:status resp) (:body resp)))
+
+        (and (= request-method :get) alpha-uri (= alpha-uri "/meta/model/verify"))
+        (let [resp (routes/compat-meta-model-verify {:node node
+                                                     :profile (get-in req [:headers "x-profile"])
+                                                     :scope :patterns})]
+          (response req (:status resp) (:body resp)))
+
+        (and (= request-method :get) alpha-uri (= alpha-uri "/meta/model/docbook/verify"))
+        (let [resp (routes/compat-meta-model-verify {:node node
+                                                     :profile (get-in req [:headers "x-profile"])
+                                                     :scope :docbook})]
+          (response req (:status resp) (:body resp)))
+
+        (and (= request-method :get) alpha-uri (= alpha-uri "/patterns/registry"))
+        (let [resp (routes/compat-patterns-registry {:node node
+                                                     :profile (get-in req [:headers "x-profile"])})]
+          (response req (:status resp) (:body resp)))
+
+        (and (= request-method :get) alpha-uri (= alpha-uri "/types"))
+        (let [resp (routes/list-types {:node node})]
+          (response req (:status resp) (:body resp)))
+
+        (and (= request-method :post) alpha-uri (= alpha-uri "/types/parent"))
+        (let [resp (routes/types-parent (merge base-req {:node node}))]
+          (response req (:status resp) (:body resp)))
+
+        (and (= request-method :post) alpha-uri (= alpha-uri "/types/merge"))
+        (let [resp (routes/types-merge (merge base-req {:node node}))]
+          (response req (:status resp) (:body resp)))
 
         (and (= request-method :post) (= uri "/models"))
         (let [resp (routes/register-model base-req)]
@@ -319,7 +430,7 @@
           (response req (:status resp) (:body resp)))
 
         (and (= request-method :get) (str/starts-with? uri "/entity/"))
-        (let [eid (entity-id-from-uri uri)
+        (let [eid (some-> (entity-id-from-uri uri) url-decode)
               resp (routes/entity-by-id {:node node :id eid})]
           (response req (:status resp) (:body resp)))
 

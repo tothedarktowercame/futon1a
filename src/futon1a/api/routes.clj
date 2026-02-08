@@ -4,6 +4,9 @@
    Pattern:  storage/canonical-interface
    Theory:   futon-theory/error-hierarchy (all handlers use with-error-handling)"
   (:require [futon1a.api.errors :as errors]
+            [futon1a.compat.futon1-graph :as f1g]
+            [futon1a.compat.futon1-model :as f1m]
+            [futon1a.compat.futon1-write :as f1w]
             [futon1a.diag.health :as health]
             [futon1a.core.identity :as id]
             [futon1a.model.descriptor-store :as dstore]
@@ -275,6 +278,126 @@
                :body {:error {:reason :not-found
                               :identity {:source src :external-id ext}
                               :identity/doc idx-doc}}})))))))
+
+(defn compat-entity
+  "Futon1 API compatibility: GET /entity/:id (and /api/alpha/entity/:id).
+
+   Success shape:
+   {:profile P :entity {:id .. :name .. :type .. :source ..}}"
+  [{:keys [node id profile]}]
+  (with-error-handling
+    (require-keys! {:node node :id id} #{:node :id})
+    (let [doc (f1g/fetch-entity node id)]
+      (if doc
+        (ok {:profile (or profile "default")
+             :entity (f1g/normalize-entity doc)})
+        {:status 404
+         :body {:error "Entity not found"
+                :profile (or profile "default")
+                :entity-id id}}))))
+
+(defn compat-entities-latest
+  "Futon1 API compatibility: GET /entities/latest.
+
+   Query:
+   - type (string like \"pattern/library\")
+   - limit (long)
+  "
+  [{:keys [node type limit profile]}]
+  (with-error-handling
+    (require-keys! {:node node :type type} #{:node :type})
+    (let [type-kw (if (string? type) (keyword type) type)
+          {:keys [entities]} (f1g/entities-latest node {:type type-kw :limit limit})]
+      (ok {:profile (or profile "default")
+           :type (if (keyword? type-kw) (subs (str type-kw) 1) (str type-kw))
+           :entities entities}))))
+
+(defn compat-ego
+  "Futon1 API compatibility: GET /ego/:name."
+  [{:keys [node name profile]}]
+  (with-error-handling
+    (require-keys! {:node node :name name} #{:node :name})
+    (ok {:command "/ego"
+         :name name
+         :profile (or profile "default")
+         :ego (f1g/ego node name)})))
+
+(defn compat-meta-model
+  "Futon1 API compatibility: GET /meta/model (patterns descriptor)."
+  [{:keys [node scope profile]}]
+  (with-error-handling
+    (require-keys! {:node node :scope scope} #{:node :scope})
+    (if-let [m (f1m/describe-scope node scope)]
+      (ok (assoc m :profile (or profile "default")))
+      {:status 404
+       :body {:error "Model descriptor not found"
+              :profile (or profile "default")
+              :scope scope}})))
+
+(defn compat-meta-model-verify
+  "Futon1 API compatibility: GET /meta/model/<scope>/verify."
+  [{:keys [node scope profile]}]
+  (with-error-handling
+    (require-keys! {:node node :scope scope} #{:node :scope})
+    (ok (assoc (verify/verify-scope node scope)
+               :profile (or profile "default")))))
+
+(defn compat-patterns-registry
+  "Futon1 API compatibility: GET /patterns/registry."
+  [{:keys [node profile]}]
+  (with-error-handling
+    (require-keys! {:node node} #{:node})
+    (ok {:profile (or profile "default")
+         :registry (f1g/patterns-registry node)})))
+
+(defn compat-ensure-entity
+  "Futon1 API compatibility: POST /entity (under /api/alpha).
+
+   Accepts Futon1-shaped JSON entity payload and writes Futon1 graph-memory docs."
+  [{:keys [node store penholder allowed-penholders profile payload]}]
+  (with-error-handling
+    (require-keys! {:node node :store store :penholder penholder :allowed-penholders allowed-penholders} #{:node :store :penholder :allowed-penholders})
+    (require-keys! payload #{:name :type})
+    (let [{:keys [doc entity]} (f1w/ensure-entity-doc {:node node :payload payload})
+          ;; Use the entity doc itself as the L4/L2 model to keep the pipeline honest.
+          result (pipeline/run-write!
+                  {:store store
+                   :penholder penholder
+                   :allowed-penholders allowed-penholders
+                   :model (dissoc doc :xt/id)
+                   :required-keys #{:entity/id :entity/name :entity/type}
+                   :identity nil
+                   :tx-ops [[:xtdb.api/put doc]]
+                   :claim {:op :compat/futon1-entity}
+                   :detail {:name (:name payload) :type (:type payload)}})]
+      (ok {:profile (or profile "default")
+           :entity entity
+           :tx-id (:tx-id result)
+           :path/id (get-in result [:path :path/id])}))))
+
+(defn compat-upsert-relation
+  "Futon1 API compatibility: POST /relation (under /api/alpha)."
+  [{:keys [node store penholder allowed-penholders profile payload]}]
+  (with-error-handling
+    (require-keys! {:node node :store store :penholder penholder :allowed-penholders allowed-penholders} #{:node :store :penholder :allowed-penholders})
+    (require-keys! payload #{:type :src :dst})
+    (let [{:keys [doc relation]} (f1w/upsert-relation-doc {:node node :payload payload})
+          ;; Pipeline integrity check uses :relation/from/:relation/to, so include them in model.
+          model (select-keys doc [:relation/id :relation/from :relation/to])
+          result (pipeline/run-write!
+                  {:store store
+                   :penholder penholder
+                   :allowed-penholders allowed-penholders
+                   :model model
+                   :required-keys #{:relation/id :relation/from :relation/to}
+                   :identity nil
+                   :tx-ops [[:xtdb.api/put doc]]
+                   :claim {:op :compat/futon1-relation}
+                   :detail {:type (:type payload)}})]
+      (ok {:profile (or profile "default")
+           :relation relation
+           :tx-id (:tx-id result)
+           :path/id (get-in result [:path :path/id])}))))
 
 (defn ingest
   "Ingest open-world data.

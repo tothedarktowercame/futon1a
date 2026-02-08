@@ -5,6 +5,7 @@
 
    For Prototype 2 we require at least one working invariant check."
   (:require [futon1a.model.descriptor-store :as ds]
+            [clojure.string :as str]
             [xtdb.api :as xtdb]))
 
 (defn- ok [id] {:invariant id :ok? true})
@@ -26,8 +27,31 @@
       (ok :meta/descriptor-has-certificate)
       (fail :meta/descriptor-has-certificate :missing-certificate {:missing missing}))))
 
+(defn invariant-patterns-language-has-source
+  "Verify every :pattern/language entity has a non-empty :entity/source.
+
+   Note: futon1 had a richer interpretation (links to a language-source tag),
+   but for Prototype 2 we enforce the minimal, objective form."
+  [node]
+  (let [db (xtdb/db node)
+        docs (->> (xtdb/q db '{:find [(pull e [:xt/id :entity/id :entity/name :entity/source])]
+                               :where [[e :entity/type :pattern/language]]})
+                  (map first))
+        missing (->> docs
+                     (filter (fn [d]
+                               (let [s (:entity/source d)]
+                                 (or (nil? s)
+                                     (and (string? s) (empty? (str/trim s)))))))
+                     (map (fn [d] {:entity/id (or (:entity/id d) (:xt/id d))
+                                   :entity/name (:entity/name d)}))
+                     (vec))]
+    (if (empty? missing)
+      (ok :patterns/language-has-source)
+      (fail :patterns/language-has-source :missing-source {:missing missing}))))
+
 (def ^:private invariant-runners
-  {:meta/descriptor-has-certificate invariant-descriptor-has-certificate})
+  {:meta/descriptor-has-certificate invariant-descriptor-has-certificate
+   :patterns/language-has-source invariant-patterns-language-has-source})
 
 (defn verify-scope
   "Run invariants declared on a descriptor by scope.
@@ -47,4 +71,3 @@
       {:ok? (every? :ok? results)
        :scope scope
        :results results})))
-
