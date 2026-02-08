@@ -8,10 +8,11 @@
 (defrecord XtdbStore [node]
   layer0/DurableStore
   (submit-tx! [_ tx-ops]
-    (let [res (xtdb/submit-tx node tx-ops)]
-      (or (:xtdb.api/tx-id res)
-          (:tx-id res)
-          (str res))))
+    (let [res (xtdb/submit-tx node tx-ops)
+          tx-id (or (:xtdb.api/tx-id res)
+                    (:tx-id res)
+                    res)]
+      (str tx-id)))
   (tx-sync! [_ _tx-id]
     ;; XTDB v1 does not accept tx-id in sync; this waits for latest tx.
     (xtdb/sync node)))
