@@ -1,5 +1,8 @@
 (ns futon1a.core.pipeline
-  "Cross-layer write pipeline (stub)."
+  "Cross-layer write pipeline.
+
+   Executes gates in strict layer order: L4 → L3 → L2 → L1 → L0.
+   If layer N fails, layers below N never run."
   (:require [futon1a.auth.penholder :as auth]
             [futon1a.core.entity :as ent]
             [futon1a.core.identity :as id]
@@ -22,18 +25,23 @@
    Returns {:ok? true :tx-id <string> :path <proof-path>} or throws.
   "
   [{:keys [store penholder allowed-penholders model required-keys identity tx-ops claim detail]}]
-  (auth/authorize! {:penholder penholder :allowed-penholders allowed-penholders})
+  ;; Layer 4 — model validation (400)
   (mv/validate-model! {:model model :required-keys (or required-keys #{})})
-  (when identity
-    (id/validate-identity identity))
+  (when-not (vector? tx-ops)
+    (throw (ex-info "tx-ops required"
+                    {:error (mv/layer4-error :missing-tx-ops
+                                             {:tx-ops tx-ops})})))
+  ;; Layer 3 — authorization (403)
+  (auth/authorize! {:penholder penholder :allowed-penholders allowed-penholders})
+  ;; Layer 2 — entity/relation integrity (500)
   (when (or (:entity/id model) (:entity/type model))
     (ent/validate-entity model))
   (when (or (:relation/id model) (:relation/from model) (:relation/to model))
     (ent/validate-relation model))
-  (when-not (vector? tx-ops)
-    (throw (ex-info "tx-ops required"
-                    {:error (xt/layer0-error :missing-tx-ops
-                                             {:tx-ops tx-ops})})))
+  ;; Layer 1 — identity uniqueness (409)
+  (when identity
+    (id/validate-identity identity))
+  ;; Layer 0 — durable write (503)
   (let [{:keys [tx-id path]} (xt/durable-write-tx!
                               {:store store
                                :actor penholder
