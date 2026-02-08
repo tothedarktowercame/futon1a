@@ -8,7 +8,10 @@
                  (ent/validate-entity {:entity/type :foo})))
     (is (thrown? clojure.lang.ExceptionInfo
                  (ent/validate-entity {:entity/id "e1"})))
-    (is (:ok? (ent/validate-entity {:entity/id "e1" :entity/type :foo})))) )
+    (is (:ok? (ent/validate-entity {:entity/id "e1" :entity/type :foo}))))
+  (testing "nil entity rejected"
+    (is (thrown? clojure.lang.ExceptionInfo
+                 (ent/validate-entity nil)))))
 
 (deftest validate-relation-requires-keys
   (testing "relation must include id/from/to"

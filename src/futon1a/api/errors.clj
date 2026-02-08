@@ -11,8 +11,11 @@
     :error/context map}
   "
   [{:keys [error]}]
-  (let [{:error/keys [status reason context layer]} error]
-    {:status (or status 500)
-     :body {:error {:layer layer
-                    :reason reason
-                    :context context}}}))
+  (if (nil? error)
+    {:status 500
+     :body {:error {:reason :unknown}}}
+    (let [{:error/keys [status reason context layer]} error]
+      {:status (or status 500)
+       :body {:error {:layer layer
+                      :reason reason
+                      :context context}}})))

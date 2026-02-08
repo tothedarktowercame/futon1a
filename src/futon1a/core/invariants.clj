@@ -19,7 +19,13 @@
    Returns {:ok? true} or throws.
   "
   [{:keys [prev next label]}]
-  (when (and (number? prev) (number? next) (< next prev))
+  (when-not (and (number? prev) (number? next))
+    (throw (ex-info "counter-ratchet requires numeric prev/next"
+                    {:error (layer2-error :counter-ratchet-invalid
+                                          {:label label
+                                           :prev prev
+                                           :next next})})))
+  (when (< next prev)
     (throw (ex-info "counter-ratchet violation"
                     {:error (layer2-error :counter-ratchet
                                           {:label label

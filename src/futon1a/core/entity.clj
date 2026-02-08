@@ -1,18 +1,12 @@
 (ns futon1a.core.entity
-  "Layer 2 entity/relation integrity checks." )
-
-(defn- layer2-error
-  [reason context]
-  {:error/layer 2
-   :error/status 500
-   :error/reason reason
-   :error/context context})
+  "Layer 2 entity/relation integrity checks."
+  (:require [futon1a.core.invariants :as inv]))
 
 (defn- ensure-id
   [m k]
   (let [v (get m k)]
     (when-not v
-      (throw (ex-info "missing id" {:error (layer2-error :missing-id {:field k :entity m})})))
+      (throw (ex-info "missing id" {:error (inv/layer2-error :missing-id {:field k :entity m})})))
     v))
 
 (defn validate-entity
@@ -47,10 +41,10 @@
             to (:relation/to rel)]
         (when-not (contains? entity-ids from)
           (throw (ex-info "relation endpoint missing"
-                          {:error (layer2-error :missing-endpoint
-                                                {:relation rel :missing from})})))
+                          {:error (inv/layer2-error :missing-endpoint
+                                                    {:relation rel :missing from})})))
         (when-not (contains? entity-ids to)
           (throw (ex-info "relation endpoint missing"
-                          {:error (layer2-error :missing-endpoint
-                                                {:relation rel :missing to})})))))
+                          {:error (inv/layer2-error :missing-endpoint
+                                                    {:relation rel :missing to})})))))
     {:ok? true}))

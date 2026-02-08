@@ -15,9 +15,12 @@
    - model (map)
    - required-keys (set of keywords)
 
-   Returns {:ok? true} or throws.
+  Returns {:ok? true} or throws.
   "
   [{:keys [model required-keys]}]
+  (when-not (map? model)
+    (throw (ex-info "model must be a map"
+                    {:error (layer4-error :invalid-model {:model model})})))
   (doseq [k required-keys]
     (when-not (contains? model k)
       (throw (ex-info "model validation failed"

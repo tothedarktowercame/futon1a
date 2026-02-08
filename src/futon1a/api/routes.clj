@@ -33,4 +33,8 @@
     (let [result (pipeline/run-write! req)]
       (ok {:tx-id (:tx-id result)}))
     (catch clojure.lang.ExceptionInfo e
-      (handle-error e))))
+      (handle-error e))
+    (catch Exception e
+      {:status 500
+       :body {:error {:reason :exception
+                      :message (.getMessage e)}}})))

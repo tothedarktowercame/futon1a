@@ -9,3 +9,11 @@
   (testing "valid model passes"
     (is (:ok? (v/validate-model! {:model {:id 1}
                                   :required-keys #{:id}})))))
+
+(deftest validate-model-nil-or-non-map
+  (testing "nil model rejected"
+    (is (thrown? clojure.lang.ExceptionInfo
+                 (v/validate-model! {:model nil :required-keys #{:id}}))))
+  (testing "non-map model rejected"
+    (is (thrown? clojure.lang.ExceptionInfo
+                 (v/validate-model! {:model "bad" :required-keys #{:id}})))))

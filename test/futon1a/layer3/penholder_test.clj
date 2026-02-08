@@ -20,3 +20,15 @@
                               :allowed-penholders #{"alice" "joe"}})]
       (is (:ok? res))
       (is (= "alice" (:penholder res))))))
+
+(deftest authorize-trims-penholder
+  (testing "whitespace-only penholder is rejected"
+    (is (thrown? clojure.lang.ExceptionInfo
+                 (ph/authorize! {:penholder "   "
+                                 :allowed-penholders #{"alice"}})))))
+
+(deftest authorize-rejects-empty-allowlist
+  (testing "empty allowlist rejects all penholders"
+    (is (thrown? clojure.lang.ExceptionInfo
+                 (ph/authorize! {:penholder "alice"
+                                 :allowed-penholders #{}})))))

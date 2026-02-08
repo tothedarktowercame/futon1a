@@ -68,10 +68,14 @@
         {:tx-id tx-id
          :path path})
       (catch Exception e
-        (throw (ex-info "durable write failed"
-                        {:error (layer0-error :durability-failure
-                                              {:message (.getMessage e)})}
-                        e))))))
+        (let [edata (ex-data e)
+              layer (get-in edata [:error :error/layer])]
+          (if layer
+            (throw e)
+            (throw (ex-info "durable write failed"
+                            {:error (layer0-error :durability-failure
+                                                  {:message (.getMessage e)})}
+                            e))))))))
 
 (defn durable-write-tx!
   "Convenience wrapper for a direct tx-ops vector.
