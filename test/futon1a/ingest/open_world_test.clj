@@ -1,7 +1,9 @@
 (ns futon1a.ingest.open-world-test
-  (:require [clojure.test :refer [deftest is testing]]
+  (:require [clojure.test :refer [deftest is testing use-fixtures]]
             [futon1a.ingest.open-world :as ow]
             [futon1a.model.registry :as registry]))
+
+(use-fixtures :each (fn [f] (registry/clear-registry!) (f)))
 
 (deftest ingest-validates-entities
   (testing "invalid entity is rejected"
@@ -14,13 +16,11 @@
 
 (deftest ingest-validates-models
   (testing "missing model descriptor can be required"
-    (registry/clear-registry!)
     (is (thrown? clojure.lang.ExceptionInfo
                  (ow/ingest! {:entities [{:entity/id "e1" :entity/type :unknown}]
                              :relations []
                              :require-model? true}))))
   (testing "model validation uses registry required fields"
-    (registry/clear-registry!)
     (registry/register-model! {:id :person
                                :descriptor {:fields [:entity/id :entity/type :person/name]
                                             :required [:person/name]}})

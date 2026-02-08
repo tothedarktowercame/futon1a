@@ -1,7 +1,9 @@
 (ns futon1a.api.routes-test
-  (:require [clojure.test :refer [deftest is testing]]
+  (:require [clojure.test :refer [deftest is testing use-fixtures]]
             [futon1a.api.routes :as routes]
             [futon1a.model.registry :as registry]))
+
+(use-fixtures :each (fn [f] (registry/clear-registry!) (f)))
 
 (deftest health-endpoint
   (testing "health returns ok"
@@ -10,14 +12,13 @@
       (is (= :ok (:status (:body resp)))))))
 
 (deftest health-checks
-  (testing "health returns degraded when checks fail"
+  (testing "health returns 503 when checks fail"
     (let [resp (routes/health {:checks {:db (fn [] {:ok? false :reason :down})}})]
-      (is (= 200 (:status resp)))
+      (is (= 503 (:status resp)))
       (is (= :degraded (:status (:body resp)))))))
 
 (deftest model-registry-endpoints
   (testing "register and list models"
-    (registry/clear-registry!)
     (let [resp (routes/register-model {:id :person
                                        :descriptor {:fields [:entity/id :entity/type]
                                                     :required [:entity/id]}})]

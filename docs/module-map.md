@@ -25,6 +25,8 @@ This module map operationalizes the mission's Pattern → Code mapping and estab
 | `src/futon1a/ingest/open_world.clj` | Open-world ingest + validation | `storage/open-world-velocity-validation` |
 | `src/futon1a/api/errors.clj` | Error mapping to layers | `storage/error-layer-hierarchy` |
 | `src/futon1a/api/routes.clj` | HTTP API surface | `storage/canonical-interface` |
+| `src/futon1a/model/registry.clj` | Model/schema registry | `storage/schema-evolution-stability` |
+| `src/futon1a/scripts/repair.clj` | Repair/backfill tools | `storage/invariants-vs-repair` |
 | `src/futon1a/diag/proof_path.clj` | Proof-path event logging | `futon-theory/proof-path`, `futon-theory/event-protocol` |
 
 ## Test Harness Mapping
@@ -40,6 +42,12 @@ This module map operationalizes the mission's Pattern → Code mapping and estab
 | `test/futon1a/cross_layer` | Error propagation and layer ordering |
 | `test/futon1a/api` | API surface and error mapping |
 | `test/futon1a/stress` | Durability and identity stress tests |
+| `test/futon1a/core` | Mirror store tests |
+| `test/futon1a/diag` | Health diagnostics tests |
+| `test/futon1a/ingest` | Open-world ingest tests |
+| `test/futon1a/model` | Registry tests |
+| `test/futon1a/scripts` | Repair tooling tests |
+| `test/futon1a/integration` | XTDB integration tests |
 
 ## Notes
 

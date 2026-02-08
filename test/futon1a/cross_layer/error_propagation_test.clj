@@ -37,8 +37,8 @@
       (is (= 3 (get-in resp [:body :error :layer])))
       (is (= :forbidden (get-in resp [:body :error :reason]))))))
 
-(deftest error-propagation-layer2-wins-over-layer1
-  (testing "L2 errors win over later layer checks"
+(deftest error-propagation-layer2-before-layer1
+  (testing "L2 entity error preempts L1 identity check"
     (let [resp (routes/write {:store (->OkStore "tx")
                               :penholder "alice"
                               :allowed-penholders #{"alice"}

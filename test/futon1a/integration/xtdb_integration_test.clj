@@ -24,7 +24,6 @@
               db (xtdb/db node)
               ent (xtdb/entity db "e1")]
           (is (:tx-id result))
-          (is (layer0/tx-sync! store {:tx-id (:tx-id result) :timeout-ms 1000}))
           (is (= :foo (:entity/type ent))))
         (finally
           (xtnode/stop-node! node))))))

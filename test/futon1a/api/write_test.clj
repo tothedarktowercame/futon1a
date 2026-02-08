@@ -28,7 +28,7 @@
       (is (= 400 (:status resp))))))
 
 (deftest write-success
-  (testing "valid write returns tx-id"
+  (testing "valid write returns tx-id and path/id"
     (let [resp (routes/write {:store (->TestStore "tx-ok")
                               :penholder "alice"
                               :allowed-penholders #{"alice"}
@@ -36,4 +36,5 @@
                               :required-keys #{:id}
                               :tx-ops [{:op :noop}]})]
       (is (= 200 (:status resp)))
-      (is (= "tx-ok" (get-in resp [:body :tx-id]))))))
+      (is (= "tx-ok" (get-in resp [:body :tx-id])))
+      (is (string? (get-in resp [:body :path/id]))))))

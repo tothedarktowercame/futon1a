@@ -14,20 +14,13 @@
                     res)]
       (str tx-id)))
   (tx-sync! [_ tx-id]
-    ;; Prefer await-tx when we can parse a tx-id, fall back to sync.
-    (let [{:keys [tx-id timeout-ms]} (if (map? tx-id) tx-id {:tx-id tx-id})
-          tx-id (cond
-                  (number? tx-id) tx-id
-                  (string? tx-id) (try
-                                    (Long/parseLong tx-id)
-                                    (catch Exception _ nil))
-                  :else nil)
-          timeout (when timeout-ms (java.time.Duration/ofMillis timeout-ms))]
-      (cond
-        (and tx-id timeout) (xtdb/await-tx node {:xtdb.api/tx-id tx-id} timeout)
-        tx-id (xtdb/await-tx node {:xtdb.api/tx-id tx-id})
-        timeout (xtdb/sync node timeout)
-        :else (xtdb/sync node)))))
+    ;; Try to parse tx-id as a Long for await-tx; fall back to generic sync.
+    ;; StubStore returns "tx-stub" which won't parse — that's fine, sync works.
+    (let [parsed (when (string? tx-id)
+                   (try (Long/parseLong tx-id) (catch NumberFormatException _ nil)))]
+      (if parsed
+        (xtdb/await-tx node {:xtdb.api/tx-id parsed})
+        (xtdb/sync node)))))
 
 (defn start-node!
   "Start an XTDB node with the given config map." [config]

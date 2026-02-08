@@ -1,5 +1,5 @@
 (ns futon1a.api.routes
-  "Minimal API surface for futon1a (stub)."
+  "Minimal API surface for futon1a."
   (:require [futon1a.api.errors :as errors]
             [futon1a.diag.health :as health]
             [futon1a.ingest.open-world :as open-world]
@@ -23,18 +23,35 @@
                                                 :required ks})}))))
   m)
 
+(defn- handle-error
+  [e]
+  (errors/error->response (ex-data e)))
+
+(defn- handle-unexpected
+  [e]
+  {:status 500
+   :body {:error {:reason :exception
+                  :message (.getMessage e)}}})
+
+(defmacro ^:private with-error-handling
+  [& body]
+  `(try
+     ~@body
+     (catch clojure.lang.ExceptionInfo e#
+       (handle-error e#))
+     (catch Exception e#
+       (handle-unexpected e#))))
+
 (defn health
   "Health endpoint. Accepts optional checks/counts metadata."
   ([] (health {}))
   ([opts]
-   (ok (health/health-report opts))))
-
-(defn handle-error
-  [e]
-  (errors/error->response (ex-data e)))
+   (let [report (health/health-report opts)]
+     {:status (if (= :ok (:status report)) 200 503)
+      :body report})))
 
 (defn write
-  "Stub write handler.
+  "Write handler.
 
    Expects a map with keys:
    - store
@@ -46,15 +63,10 @@
    - tx-ops
   "
   [req]
-  (try
+  (with-error-handling
     (let [result (pipeline/run-write! req)]
-      (ok {:tx-id (:tx-id result)}))
-    (catch clojure.lang.ExceptionInfo e
-      (handle-error e))
-    (catch Exception e
-      {:status 500
-       :body {:error {:reason :exception
-                      :message (.getMessage e)}}})))
+      (ok {:tx-id (:tx-id result)
+           :path/id (get-in result [:path :path/id])}))))
 
 (defn register-model
   "Register a model descriptor.
@@ -63,11 +75,9 @@
    - id (keyword)
    - descriptor (map)"
   [req]
-  (try
+  (with-error-handling
     (require-keys! req #{:id :descriptor})
-    (ok (registry/register-model! req))
-    (catch clojure.lang.ExceptionInfo e
-      (handle-error e))))
+    (ok (registry/register-model! req))))
 
 (defn list-models
   "List all registered model ids."
@@ -82,11 +92,9 @@
    - relations (vector)
    - require-model? (optional)"
   [req]
-  (try
+  (with-error-handling
     (require-keys! req #{:entities :relations})
-    (ok (open-world/ingest! req))
-    (catch clojure.lang.ExceptionInfo e
-      (handle-error e))))
+    (ok (open-world/ingest! req))))
 
 (defn repair
   "Repair entities.
@@ -96,11 +104,9 @@
    - repair-fn (optional)
    - dry-run? (optional)"
   [req]
-  (try
+  (with-error-handling
     (require-keys! req #{:entities})
-    (ok (repair/repair-entities! req))
-    (catch clojure.lang.ExceptionInfo e
-      (handle-error e))))
+    (ok (repair/repair-entities! req))))
 
 (defn verify-repair
   "Verify repair results.
@@ -109,8 +115,6 @@
    - prev, next, label
    - errors (optional)"
   [req]
-  (try
+  (with-error-handling
     (require-keys! req #{:prev :next :label})
-    (ok (repair/verify-repair! req))
-    (catch clojure.lang.ExceptionInfo e
-      (handle-error e))))
+    (ok (repair/verify-repair! req))))
