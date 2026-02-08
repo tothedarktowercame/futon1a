@@ -1,107 +1,148 @@
-# Codex Task: Review Fixes (S1–S5, M1–M3)
+# Codex Task: Prototype 1 — Runnable System
 
-The critical fixes (C1–C3) have been applied in this commit. The remaining
-significant and minor items from the review are listed below for Codex.
+**Goal:** futon1a starts, serves HTTP, persists to XTDB, and survives a restart
+cycle with data intact.
+
+**Spec reference:** `futon3/holes/missions/M-futon1a-rebuild.md` — Section 2.6
+(Canonical HTTP API) and the Prototype 1 Gate section.
 
 Run `clj-kondo --lint src/ test/` and `clj -X:test` after each change.
+All 82 existing tests must remain green (no regressions).
 
 ---
 
-## Significant
+## Exit Conditions (all must be true)
 
-### S1. `routes/write` only catches `ExceptionInfo` (`api/routes.clj:35`)
+1. **XTDB node lifecycle** — `system.clj` starts an embedded XTDB node with
+   RocksDB persistence, writes to it, shuts down cleanly. Data dir is
+   configurable (default: `data/`).
 
-Add an outer `(catch Exception e ...)` that returns a generic 500 response with
-the exception message. Without this, a `RuntimeException` or `IOException` from
-a store implementation escapes unhandled instead of returning a structured error
-body.
+2. **HTTP ring adapter** — Routes served over HTTP via Ring + Jetty.
+   `GET /health` returns 200. `POST /write` with valid payload returns `tx-id`.
 
-### S2. `error->response` fragile on unexpected ex-data (`api/errors.clj`)
+3. **Read path** — At minimum `GET /entity/:id` returns an entity by UUID.
+   Required for the restart cycle test. (See spec Section 2.6.6.)
 
-If `ex-data` lacks an `:error` key the response body is all nils. Add a guard:
-if `error` is nil, return `{:status 500 :body {:error {:reason :unknown}}}` (or
-similar).
+4. **System context injection** — `system.clj` injects `:store` and
+   `:allowed-penholders` into every request before it reaches the handler.
+   HTTP callers do NOT supply `:store`. (See spec Section 2.6.7.)
 
-### S3. Docstring warning on `durable-write!` catch block (`core/xtdb.clj:70-73`)
+5. **Restart cycle test** — Automated test: start system → write entity via
+   HTTP → stop → restart → read entity back via HTTP → assert data survived.
+   Uses real embedded XTDB, not stubs.
 
-The `catch Exception` in `durable-write!` wraps everything as Layer 0. This is
-correct today because the pipeline runs higher-layer checks outside of
-`durable-write!`, but if `write-fn` ever calls code that throws with layer info,
-that info is lost. Add a docstring note or, better, check whether the caught
-exception already carries `:error/layer` and re-throw it unwrapped if so.
-
-### S4. Consolidate `layer2-error` to one definition
-
-`layer2-error` is defined independently in three files:
-
-- `core/rehydrate.clj` (public)
-- `core/entity.clj` (private)
-- `core/invariants.clj` (public)
-
-Pick one canonical location (suggest `core/invariants.clj` since it's the
-cross-layer module) and have the other two `require` it. Delete the duplicates.
-
-### S5. `counter-ratchet` silently passes on non-numeric inputs (`core/invariants.clj`)
-
-`(counter-ratchet {:prev nil :next 0 :label :entities})` returns `{:ok? true}`.
-Either throw on non-numeric `prev`/`next`, or document the "only enforce when
-both are numeric" behavior. Add tests for nil and non-numeric inputs.
+6. **No regressions** — All 82 Prototype 0 tests still pass.
 
 ---
 
-## Minor
+## Implementation Steps
 
-### M1. Module map is stale (`docs/module-map.md`)
+### 1. Add dependencies to `deps.edn`
 
-- Layer 4 lists `model/registry.clj` — actual file is `model/validation.clj`.
-- Missing from the tables: `core/pipeline.clj`, `api/routes.clj`, `api/errors.clj`.
-- Test harness mapping omits `test/layer3`, `test/layer4`, `test/api`, `test/stress`.
+```clojure
+ring/ring-core {:mvn/version "1.12.2"}
+ring/ring-jetty-adapter {:mvn/version "1.12.2"}
+metosin/muuntaja {:mvn/version "0.6.10"}     ; content negotiation (EDN/JSON)
+metosin/reitit-ring {:mvn/version "0.7.2"}   ; routing
+```
 
-Update the tables to match the current repo layout.
+Use your judgement on versions — these are suggestions. Reitit is optional;
+plain Ring + Compojure or manual routing is fine too.
 
-### M2. Missing edge-case tests
+### 2. Create `src/futon1a/core/system.clj`
 
-Add tests for these cases:
+Owns the lifecycle of:
+- XTDB node (start/stop, config with data dir)
+- Ring/Jetty HTTP server (start/stop, port)
+- System map that holds both
 
-**Layer 3 (`test/layer3/penholder_test.clj`):**
-- Whitespace-only penholder `"   "` treated as nil -> 403
-- Empty `allowed-penholders #{}` always rejects
+Provide:
+- `(start-system! config)` → returns system map
+- `(stop-system! system)` → shuts down cleanly
+- Config shape: `{:xtdb {:data-dir "data/"} :http {:port 3000} :allowed-penholders #{"default"}}`
 
-**Layer 4 (`test/layer4/model_validation_test.clj`):**
-- `nil` model
-- Non-map model (e.g., a string)
+### 3. Create HTTP routing
 
-**Entity (`test/layer2/entity_test.clj`):**
-- `nil` entity map
+Wire the existing handlers in `routes.clj` to HTTP paths:
 
-**Counter-ratchet (`test/invariants/counter_ratchet_test.clj`):**
-- `nil` inputs
-- `{:prev 0 :next 0}` (equal at zero)
+| Method | Path | Handler |
+|--------|------|---------|
+| GET | `/health` | `routes/health` |
+| POST | `/write` | `routes/write` |
+| POST | `/ingest` | `routes/ingest` |
+| POST | `/models` | `routes/register-model` |
+| GET | `/models` | `routes/list-models` |
+| POST | `/repair` | `routes/repair` |
+| POST | `/repair/verify` | `routes/verify-repair` |
+| GET | `/entity/:id` | **New** — read entity by UUID from XTDB |
 
-**Pipeline (`test/api/write_test.clj` or new `test/cross_layer/pipeline_order_test.clj`):**
-- Request that fails both L4 and L3 returns 400 (not 403), proving ordering
-- Identity conflict (L1) surfaces as 409 through `routes/write`
-- Entity error (L2) surfaces as 500 through `routes/write`
+**Critical:** Middleware must inject `:store` and `:allowed-penholders` from the
+system context into each request map before it reaches the handler. The handler
+functions currently expect these in the request. HTTP callers provide only
+`:penholder`, `:model`, `:identity`, `:tx-ops`, etc.
 
-### M3. Delete placeholder test files
+### 4. Add read handler
 
-These are empty shells left over from Phase 0. They can be removed now that real
-tests exist:
+Add to `routes.clj` (or a new `api/read.clj`):
 
-- `test/futon1a/layer0/placeholder_test.clj`
-- `test/futon1a/layer1/placeholder_test.clj`
-- `test/futon1a/layer2/placeholder_test.clj`
-- `test/futon1a/cross_layer/placeholder_test.clj`
-- `test/futon1a/invariants/placeholder_test.clj`
+```clojure
+(defn entity
+  "Read an entity by UUID from XTDB."
+  [req]
+  (with-error-handling
+    (let [id (get-in req [:path-params :id])
+          store (:store req)
+          doc (xtdb/entity store id)]  ; however your store protocol exposes reads
+      (if doc
+        (ok doc)
+        {:status 404 :body {:error {:reason :not-found :context {:id id}}}}))))
+```
 
-(Check each — if any contain real tests, keep them.)
+This is the minimal read path needed for the restart cycle test.
+
+### 5. Create integration test
+
+`test/futon1a/integration/restart_cycle_test.clj`
+
+```
+start system (temp data dir)
+  → POST /write with entity
+  → assert 200, capture tx-id
+  → stop system
+  → start system (same data dir)
+  → GET /entity/:id
+  → assert entity matches what was written
+  → stop system
+  → clean up temp dir
+```
+
+Use `clj-http` or raw `java.net.http` for HTTP calls, or call the Ring handler
+directly as a function (handler-as-function is acceptable for Prototype 1).
+
+### 6. Wire health to real XTDB
+
+`routes/health` should include an XTDB status check (node is running, can
+query). Pass the check function via the system context.
 
 ---
 
-## Files touched by this commit (do NOT modify)
+## Files to create or modify
 
-These files were changed in the critical-fix commit. Do not re-modify them
-unless a test fails:
+| File | Action |
+|------|--------|
+| `deps.edn` | Add Ring, Jetty, routing deps |
+| `src/futon1a/core/system.clj` | **New** — lifecycle |
+| `src/futon1a/api/routes.clj` | Add `entity` read handler |
+| `src/futon1a/api/handler.clj` | **New** (optional) — Ring handler + routing + middleware |
+| `test/futon1a/integration/restart_cycle_test.clj` | **New** — restart cycle |
 
-- `src/futon1a/core/pipeline.clj` — layer ordering fixed (C1, C2)
-- `test/futon1a/cross_layer/error_hierarchy_test.clj` — L0 fields verified, L3/L4 added (C3)
+---
+
+## What NOT to do
+
+- Do NOT add Datascript mirror (XTDB-only for Prototype 1)
+- Do NOT add authentication middleware (penholder in body is fine)
+- Do NOT add TLS, CORS, or production hardening
+- Do NOT modify existing handler logic — only wrap it for HTTP
+- Do NOT weaken any invariant or bypass any layer gate
+- Do NOT propose "tradeoffs" that skip the read path or the restart cycle test
