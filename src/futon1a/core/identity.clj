@@ -14,11 +14,10 @@
 
 (defn uuid-string?
   [s]
-  (when (string? s)
-    (try
-      (UUID/fromString s)
-      true
-      (catch Exception _ false))))
+  (boolean
+    (when (string? s)
+      (try (UUID/fromString s) true
+           (catch Exception _ false)))))
 
 (defn normalize-external-id
   [s]
@@ -32,7 +31,9 @@
    - id (string UUID)
    - external-id (string)
    - source (string)
-   - existing-by-external (optional map)
+   - existing-by-external: result of looking up this external-id in the
+     store. Pass nil if no conflict; pass the existing entity map if one
+     was found. Any truthy value triggers a 409 conflict rejection.
 
    Returns {:ok? true :id <uuid> :external-id <string>} or throws.
   "
