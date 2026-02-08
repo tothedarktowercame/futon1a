@@ -1,0 +1,63 @@
+(ns futon1a.cross-layer.error-propagation-test
+  (:require [clojure.test :refer [deftest is testing]]
+            [futon1a.api.routes :as routes]
+            [futon1a.core.xtdb :as xt]))
+
+(defrecord OkStore [tx]
+  xt/DurableStore
+  (submit-tx! [_ _] tx)
+  (tx-sync! [_ _] true))
+
+(defrecord FailingStore []
+  xt/DurableStore
+  (submit-tx! [_ _] (throw (ex-info "boom" {:cause :submit})))
+  (tx-sync! [_ _] true))
+
+(deftest error-propagation-layer4
+  (testing "L4 validation errors propagate to response"
+    (let [resp (routes/write {:store (->OkStore "tx")
+                              :penholder "alice"
+                              :allowed-penholders #{"alice"}
+                              :model {}
+                              :required-keys #{:id}
+                              :tx-ops [{:op :noop}]})]
+      (is (= 400 (:status resp)))
+      (is (= 4 (get-in resp [:body :error :layer])))
+      (is (= :missing-field (get-in resp [:body :error :reason]))))))
+
+(deftest error-propagation-layer3
+  (testing "L3 auth errors propagate to response"
+    (let [resp (routes/write {:store (->OkStore "tx")
+                              :penholder "eve"
+                              :allowed-penholders #{"alice"}
+                              :model {:id 1}
+                              :required-keys #{:id}
+                              :tx-ops [{:op :noop}]})]
+      (is (= 403 (:status resp)))
+      (is (= 3 (get-in resp [:body :error :layer])))
+      (is (= :forbidden (get-in resp [:body :error :reason]))))))
+
+(deftest error-propagation-layer2-wins-over-layer1
+  (testing "L2 errors win over later layer checks"
+    (let [resp (routes/write {:store (->OkStore "tx")
+                              :penholder "alice"
+                              :allowed-penholders #{"alice"}
+                              :model {:entity/id "e1"}
+                              :required-keys #{:entity/id}
+                              :identity {:id "not-a-uuid"}
+                              :tx-ops [{:op :noop}]})]
+      (is (= 500 (:status resp)))
+      (is (= 2 (get-in resp [:body :error :layer])))
+      (is (= :missing-id (get-in resp [:body :error :reason]))))))
+
+(deftest error-propagation-layer0
+  (testing "L0 durability errors propagate to response"
+    (let [resp (routes/write {:store (->FailingStore)
+                              :penholder "alice"
+                              :allowed-penholders #{"alice"}
+                              :model {:id 1}
+                              :required-keys #{:id}
+                              :tx-ops [{:op :noop}]})]
+      (is (= 503 (:status resp)))
+      (is (= 0 (get-in resp [:body :error :layer])))
+      (is (= :durability-failure (get-in resp [:body :error :reason]))))))
