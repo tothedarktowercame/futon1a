@@ -70,6 +70,65 @@
   (when-let [m (re-matches #"(?i)page-(\\d+)-.*\\.(mp3|wav|flac|ogg|m4a)$" filename)]
     (Long/parseLong (nth m 1))))
 
+(defn- audio-file?
+  [^File f]
+  (let [n (some-> (.getName f) str/lower-case)]
+    (boolean (and n (re-find #"\.(mp3|wav|flac|ogg|m4a)$" n)))))
+
+(defn- base-name
+  [^File f]
+  (let [n (.getName f)
+        i (.lastIndexOf n ".")]
+    (if (pos? i) (subs n 0 i) n)))
+
+(defn- slugify
+  [s]
+  (-> (or s "")
+      (str/lower-case)
+      (str/replace #"[^a-z0-9]+" "-")
+      (str/replace #"(^-+|-+$)" "")
+      (str/replace #"-+" "-")))
+
+(defn- normalize-for-match
+  [s]
+  (-> (or s "")
+      (str/lower-case)
+      (str/replace #"[^a-z0-9]+" " ")
+      (str/replace #"\s+" " ")
+      (str/trim)))
+
+(defn- select-file
+  "Select an audio file for a track map.
+
+  Priority:
+  1) base-name == :slug
+  2) base-name == (slugify :title)
+  3) content match: unique base-name substring in lyrics"
+  [base->file {:keys [slug title lyrics]}]
+  (let [slug (some-> slug str str/trim)
+        title (some-> title str str/trim)
+        lyrics (some-> lyrics str)
+        by-slug (when (seq slug) (get base->file slug))
+        by-title (when (seq title) (get base->file (slugify title)))
+        lyr-n (normalize-for-match lyrics)]
+    (cond
+      by-slug {:file by-slug :reason :slug}
+      by-title {:file by-title :reason :title}
+      (seq lyr-n)
+      (let [hits (->> base->file
+                      (keep (fn [[base f]]
+                              (let [b (normalize-for-match base)]
+                                (when (and (seq b) (str/includes? lyr-n b))
+                                  {:file f :reason :lyrics :match b}))))
+                      (vec))]
+        (cond
+          (= 1 (count hits)) (first hits)
+          :else {:error :no-unique-match
+                 :candidates (mapv (fn [{:keys [file match]}]
+                                     {:file (.getName ^File file) :match match})
+                                   hits)}))
+      :else {:error :no-match})))
+
 (defn- list-audio-files
   [audio-dir]
   (let [d (io/file audio-dir)]
@@ -77,8 +136,7 @@
       (throw (ex-info "audio-dir must be a directory" {:audio-dir audio-dir})))
     (->> (file-seq d)
          (filter #(.isFile ^File %))
-         (filter (fn [^File f] (some? (page-n (.getName f)))))
-         (sort-by (fn [^File f] (page-n (.getName f))))
+         (filter audio-file?)
          (vec))))
 
 (defn- normalize-title [s]
@@ -140,31 +198,78 @@
         _ (when-not (sequential? tracks)
             (throw (ex-info "recovery json missing :tracks vector" {:json-path json-path :keys (keys payload)})))
         files (list-audio-files audio-dir)
-        _ (when-not (= (count tracks) (count files))
-            (throw (ex-info "track/file count mismatch"
-                            {:tracks (count tracks)
-                             :files (count files)
-                             :audio-dir audio-dir
-                             :json-path json-path
-                             :file-sample (mapv #(.getName ^File %) (take 5 files))})))
-        items (mapv (fn [t ^File f]
-                      (let [title (normalize-title (:title t))
-                            lyrics (some-> (:lyrics t) str)
-                            path (.getAbsolutePath f)
-                            sha (quick-hash-sha256 path slice-bytes)
-                            track-id (format "arxana/media/misc/%s" sha)
-                            lyrics-id (format "arxana/media-lyrics/misc/%s" sha)
-                            rel-id (format "rel|%s|media/lyrics|%s" track-id lyrics-id)]
-                        {:title title
-                         :lyrics lyrics
-                         :path path
-                         :sha sha
-                         :track-id track-id
-                         :lyrics-id lyrics-id
-                         :rel-id rel-id}))
-                    tracks files)
+        page-files (->> files
+                        (filter (fn [^File f] (some? (page-n (.getName f)))))
+                        (sort-by (fn [^File f] (page-n (.getName f))))
+                        (vec))
+        base->file (->> files
+                        (map (fn [^File f] [(base-name f) f]))
+                        (into {}))
+        ;; Two modes:
+        ;; - page-N pairing when available and counts match (pma-ep1 style)
+        ;; - slug/title/lyrics matching otherwise (pma-ep2 style)
+        mode (cond
+               (and (= (count tracks) (count page-files)) (pos? (count page-files))) :page
+               :else :match)
+        items (case mode
+                :page
+                (mapv (fn [t ^File f]
+                        (let [title (normalize-title (:title t))
+                              lyrics (some-> (:lyrics t) str)
+                              path (.getAbsolutePath f)
+                              sha (quick-hash-sha256 path slice-bytes)
+                              track-id (format "arxana/media/misc/%s" sha)
+                              lyrics-id (format "arxana/media-lyrics/misc/%s" sha)
+                              rel-id (format "rel|%s|media/lyrics|%s" track-id lyrics-id)]
+                          {:title title
+                           :slug (:slug t)
+                           :reason :page
+                           :file (.getName f)
+                           :lyrics lyrics
+                           :path path
+                           :sha sha
+                           :track-id track-id
+                           :lyrics-id lyrics-id
+                           :rel-id rel-id}))
+                      tracks page-files)
+
+                :match
+                (let [selected (mapv (fn [t]
+                                       (assoc t :selection (select-file base->file t)))
+                                     tracks)
+                      problems (->> selected
+                                    (keep (fn [{:keys [title slug selection]}]
+                                            (when (or (:error selection) (nil? (:file selection)))
+                                              {:title title :slug slug :selection selection})))
+                                    (vec))]
+                  (when (seq problems)
+                    (throw (ex-info "could not match some tracks to audio files"
+                                    {:problems problems
+                                     :audio-dir audio-dir
+                                     :json-path json-path
+                                     :available (vec (sort (keys base->file)))})))
+                  (mapv (fn [{:keys [selection] :as t}]
+                          (let [^File f (:file selection)
+                                title (normalize-title (:title t))
+                                lyrics (some-> (:lyrics t) str)
+                                path (.getAbsolutePath f)
+                                sha (quick-hash-sha256 path slice-bytes)
+                                track-id (format "arxana/media/misc/%s" sha)
+                                lyrics-id (format "arxana/media-lyrics/misc/%s" sha)
+                                rel-id (format "rel|%s|media/lyrics|%s" track-id lyrics-id)]
+                            {:title title
+                             :slug (:slug t)
+                             :reason (:reason selection)
+                             :file (.getName f)
+                             :lyrics lyrics
+                             :path path
+                             :sha sha
+                             :track-id track-id
+                             :lyrics-id lyrics-id
+                             :rel-id rel-id}))
+                        selected)) )
         docs (->> items
-                  (mapcat (fn [{:keys [track-id lyrics-id rel-id title lyrics sha path] :as it}]
+                  (mapcat (fn [{:keys [track-id lyrics-id rel-id title lyrics sha path]}]
                             [(track-doc {:track-id track-id :title title :sha sha :path path})
                              (lyrics-doc {:lyrics-id lyrics-id :title title :lyrics lyrics :sha sha})
                              (rel-doc {:rel-id rel-id :track-id track-id :lyrics-id lyrics-id})]))
@@ -186,7 +291,8 @@
                           :docs (count docs)
                           :entities (count entities)
                           :relations (count relations)}
-                 :sample (mapv #(select-keys % [:title :track-id :lyrics-id :path]) (take 2 items))}]
+                 :mode mode
+                 :sample (mapv #(select-keys % [:title :slug :file :reason :track-id :lyrics-id :path]) (take 3 items))}]
     (if dry-run?
       summary
       (merge summary
@@ -202,4 +308,3 @@
                :detail {:json-path json-path
                         :audio-dir audio-dir
                         :tracks (count tracks)}})))))
-
