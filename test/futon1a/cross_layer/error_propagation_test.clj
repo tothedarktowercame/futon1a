@@ -7,7 +7,7 @@
   xt/DurableStore
   (submit-tx! [_ _] tx)
   (tx-sync! [_ _] true)
-  (entity [_ _] nil))
+  (entity [_ id] {:xt/id (str id)}))
 
 (defrecord FailingStore []
   xt/DurableStore
@@ -22,7 +22,7 @@
                               :allowed-penholders #{"alice"}
                               :model {}
                               :required-keys #{:id}
-                              :tx-ops [{:op :noop}]})]
+                              :tx-ops [[:xtdb.api/put {:xt/id "noop"}]]})]
       (is (= 400 (:status resp)))
       (is (= 4 (get-in resp [:body :error :layer])))
       (is (= :missing-field (get-in resp [:body :error :reason]))))))
@@ -34,7 +34,7 @@
                               :allowed-penholders #{"alice"}
                               :model {:id 1}
                               :required-keys #{:id}
-                              :tx-ops [{:op :noop}]})]
+                              :tx-ops [[:xtdb.api/put {:xt/id "noop"}]]})]
       (is (= 403 (:status resp)))
       (is (= 3 (get-in resp [:body :error :layer])))
       (is (= :forbidden (get-in resp [:body :error :reason]))))))
@@ -47,7 +47,7 @@
                               :model {:entity/id "e1"}
                               :required-keys #{:entity/id}
                               :identity {:id "not-a-uuid"}
-                              :tx-ops [{:op :noop}]})]
+                              :tx-ops [[:xtdb.api/put {:xt/id "noop"}]]})]
       (is (= 500 (:status resp)))
       (is (= 2 (get-in resp [:body :error :layer])))
       (is (= :missing-id (get-in resp [:body :error :reason]))))))
@@ -59,7 +59,7 @@
                               :allowed-penholders #{"alice"}
                               :model {:id 1}
                               :required-keys #{:id}
-                              :tx-ops [{:op :noop}]})]
+                              :tx-ops [[:xtdb.api/put {:xt/id "noop"}]]})]
       (is (= 503 (:status resp)))
       (is (= 0 (get-in resp [:body :error :layer])))
       (is (= :durability-failure (get-in resp [:body :error :reason]))))))

@@ -7,7 +7,7 @@
   xt/DurableStore
   (submit-tx! [_ _] tx)
   (tx-sync! [_ _] true)
-  (entity [_ _] nil))
+  (entity [_ id] {:xt/id (str id)}))
 
 (deftest pipeline-orders-layer4-before-layer3
   (testing "L4 model validation wins over L3 auth"
@@ -16,7 +16,7 @@
                               :allowed-penholders #{"alice"}
                               :model {}
                               :required-keys #{:id}
-                              :tx-ops [{:op :noop}]})]
+                              :tx-ops [[:xtdb.api/put {:xt/id "noop"}]]})]
       (is (= 400 (:status resp))))))
 
 (deftest pipeline-identity-error-propagates
@@ -27,7 +27,7 @@
                               :model {:id 1}
                               :required-keys #{:id}
                               :identity {:id "not-a-uuid"}
-                              :tx-ops [{:op :noop}]})]
+                              :tx-ops [[:xtdb.api/put {:xt/id "noop"}]]})]
       (is (= 409 (:status resp))))))
 
 (deftest pipeline-entity-error-propagates
@@ -37,5 +37,5 @@
                               :allowed-penholders #{"alice"}
                               :model {:entity/id "e1"}
                               :required-keys #{:entity/id}
-                              :tx-ops [{:op :noop}]})]
+                              :tx-ops [[:xtdb.api/put {:xt/id "noop"}]]})]
       (is (= 500 (:status resp))))))

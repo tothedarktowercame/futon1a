@@ -7,7 +7,7 @@
   xt/DurableStore
   (submit-tx! [_ _] tx)
   (tx-sync! [_ _] true)
-  (entity [_ _] nil))
+  (entity [_ id] {:xt/id (str id)}))
 
 (defrecord FailingStore []
   xt/DurableStore
@@ -22,7 +22,7 @@
                               :allowed-penholders #{"alice"}
                               :model {}
                               :required-keys #{:id}
-                              :tx-ops [{:op :noop}]})]
+                              :tx-ops [[:xtdb.api/put {:xt/id "noop"}]]})]
       (is (= 400 (:status resp)))
       (is (get-in resp [:body :error :context :field]))))
   (testing "L3 provides penholder context"
@@ -31,7 +31,7 @@
                               :allowed-penholders #{"alice"}
                               :model {:id 1}
                               :required-keys #{:id}
-                              :tx-ops [{:op :noop}]})]
+                              :tx-ops [[:xtdb.api/put {:xt/id "noop"}]]})]
       (is (= 403 (:status resp)))
       (is (= "eve" (get-in resp [:body :error :context :penholder])))))
   (testing "L2 provides missing field context"
@@ -40,7 +40,7 @@
                               :allowed-penholders #{"alice"}
                               :model {:entity/id "e1"}
                               :required-keys #{:entity/id}
-                              :tx-ops [{:op :noop}]})]
+                              :tx-ops [[:xtdb.api/put {:xt/id "noop"}]]})]
       (is (= 500 (:status resp)))
       (is (= :entity/type (get-in resp [:body :error :context :field])))))
   (testing "L1 provides id context"
@@ -50,7 +50,7 @@
                               :model {:id 1}
                               :required-keys #{:id}
                               :identity {:id "not-a-uuid"}
-                              :tx-ops [{:op :noop}]})]
+                              :tx-ops [[:xtdb.api/put {:xt/id "noop"}]]})]
       (is (= 409 (:status resp)))
       (is (= "not-a-uuid" (get-in resp [:body :error :context :id])))))
   (testing "L0 provides message context"
@@ -59,6 +59,6 @@
                               :allowed-penholders #{"alice"}
                               :model {:id 1}
                               :required-keys #{:id}
-                              :tx-ops [{:op :noop}]})]
+                              :tx-ops [[:xtdb.api/put {:xt/id "noop"}]]})]
       (is (= 503 (:status resp)))
       (is (string? (get-in resp [:body :error :context :message]))))))

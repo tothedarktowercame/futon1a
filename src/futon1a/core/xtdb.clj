@@ -18,6 +18,53 @@
    :error/reason reason
    :error/context context})
 
+(defn- put-docs
+  "Extract XTDB put docs from a tx-ops vector."
+  [tx-ops]
+  (->> tx-ops
+       (keep (fn [op]
+               (when (and (vector? op)
+                          (= :xtdb.api/put (first op))
+                          (map? (second op)))
+                 (second op))))
+       (vec)))
+
+(defn- put-ids
+  [tx-ops]
+  (->> (put-docs tx-ops)
+       (map :xt/id)
+       (keep identity)
+       (map str)
+       (distinct)
+       (vec)))
+
+(defn- verify-materialized!
+  "Postcondition: every explicit put doc must be readable by :xt/id after tx-sync!.
+
+  If this fails, callers must not treat the write as successful, even if XTDB
+  returned a tx-id. This closes the 'accepted but not queryable' failure mode."
+  [store tx-id tx-ops]
+  (let [docs (put-docs tx-ops)
+        missing-xt-id (->> docs (remove :xt/id) (take 3) (vec))]
+    (when (seq missing-xt-id)
+      (throw (ex-info "put doc missing :xt/id"
+                      {:error (layer0-error :missing-xt-id-in-put
+                                            {:tx-id tx-id
+                                             :sample missing-xt-id})})))
+    (let [ids (put-ids tx-ops)
+          missing (->> ids
+                       (remove (fn [id] (some? (entity store id))))
+                       (vec))]
+      (when (seq missing)
+        (throw (ex-info "durable tx committed but entities not materialized"
+                        {:error (layer0-error :postcommit-missing-entities
+                                              {:tx-id tx-id
+                                               :missing missing
+                                               :expected (count ids)
+                                               :observed (- (count ids) (count missing))})})))
+      {:ok? true
+       :counts {:puts (count ids)}})))
+
 (defn durable-write!
   "Run a durability-gated write with proof-path logging.
 
@@ -50,11 +97,20 @@
       (let [tx-ops (when write-fn (write-fn))
             _ (when (and (nil? tx-ops) (not allow-noop?) write-fn)
                 (throw (ex-info "write-fn returned nil tx-ops" {:reason :missing-tx-ops})))
-            path (proof/append-event path (ev :verify))
-            path (proof/append-event path (ev :invariant-check))
             tx-id (when tx-ops (submit-tx! store tx-ops))
             tx-id (or tx-id "tx-noop")
             _ (when tx-ops (tx-sync! store tx-id))
+            ;; Postcommit materialization check: do not ACK success if the tx
+            ;; doesn't yield queryable entities.
+            materialized (when tx-ops (verify-materialized! store tx-id tx-ops))
+            path (proof/append-event path (proof/event {:path/id pid
+                                                        :actor actor
+                                                        :phase :verify
+                                                        :claim claim
+                                                        :detail detail
+                                                        :tx-id tx-id
+                                                        :evidence (or materialized {:ok? true})}))
+            path (proof/append-event path (ev :invariant-check))
             path (proof/append-event path (proof/event {:path/id pid
                                                         :actor actor
                                                         :phase :proof-commit
@@ -100,4 +156,6 @@
   DurableStore
   (submit-tx! [_ _] "tx-stub")
   (tx-sync! [_ _] true)
+  ;; Keep stub reads nil by default; durable-write! only verifies :xtdb.api/put ops,
+  ;; so callers that use non-XTDB tx-ops in tests remain unaffected.
   (entity [_ _] nil))

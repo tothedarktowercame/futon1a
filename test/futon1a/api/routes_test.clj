@@ -8,7 +8,7 @@
   xt/DurableStore
   (submit-tx! [_ _] tx)
   (tx-sync! [_ _] true)
-  (entity [_ _] nil))
+  (entity [_ id] {:xt/id (str id)}))
 
 (use-fixtures :each (fn [f] (registry/clear-registry!) (f)))
 
@@ -59,7 +59,7 @@
                                :allowed-penholders #{"alice"}
                                :entities [{:entity/id "e1" :entity/type :foo}]
                                :relations []
-                               :tx-ops [{:op :noop}]})]
+                               :tx-ops [[:xtdb.api/put {:xt/id "noop"}]]})]
       (is (= 403 (:status resp)))))
   (testing "ingest returns counts"
     (let [resp (routes/ingest {:store (->TestStore "tx")
@@ -67,7 +67,7 @@
                                :allowed-penholders #{"alice"}
                                :entities [{:entity/id "e1" :entity/type :foo}]
                                :relations []
-                               :tx-ops [{:op :noop}]})]
+                               :tx-ops [[:xtdb.api/put {:xt/id "noop"}]]})]
       (is (= 200 (:status resp)))
       (is (= 1 (get-in resp [:body :counts :entities]))))))
 

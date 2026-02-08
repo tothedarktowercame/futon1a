@@ -67,6 +67,11 @@
     (throw (ex-info "tx-ops required"
                     {:error (mv/layer4-error :missing-tx-ops
                                              {:tx-ops tx-ops})})))
+  (when-not (every? vector? tx-ops)
+    (throw (ex-info "tx-ops must be a vector of XTDB op vectors"
+                    {:error (mv/layer4-error :invalid-tx-ops
+                                             {:expected :vector-of-vectors
+                                              :sample (take 3 tx-ops)})})))
   ;; Layer 3 — authorization (403)
   (if tooling
     (auth/authorize-tooling! {:penholder penholder
@@ -152,6 +157,11 @@
     (throw (ex-info "tx-ops required"
                     {:error (mv/layer4-error :missing-tx-ops
                                              {:tx-ops tx-ops})})))
+  (when-not (every? vector? tx-ops)
+    (throw (ex-info "tx-ops must be a vector of XTDB op vectors"
+                    {:error (mv/layer4-error :invalid-tx-ops
+                                             {:expected :vector-of-vectors
+                                              :sample (take 3 tx-ops)})})))
   (if tooling
     (auth/authorize-tooling! {:penholder penholder
                               :allowed-penholders allowed-penholders

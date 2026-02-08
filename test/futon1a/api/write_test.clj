@@ -7,7 +7,7 @@
   xt/DurableStore
   (submit-tx! [_ _] tx)
   (tx-sync! [_ _] true)
-  (entity [_ _] nil))
+  (entity [_ id] {:xt/id (str id)}))
 
 (deftest write-requires-penholder
   (testing "missing penholder returns 403"
@@ -15,7 +15,7 @@
                               :allowed-penholders #{"alice"}
                               :model {:id 1}
                               :required-keys #{:id}
-                              :tx-ops [{:op :noop}]})]
+                              :tx-ops [[:xtdb.api/put {:xt/id "noop"}]]})]
       (is (= 403 (:status resp))))))
 
 (deftest write-validates-model
@@ -25,7 +25,7 @@
                               :allowed-penholders #{"alice"}
                               :model {}
                               :required-keys #{:id}
-                              :tx-ops [{:op :noop}]})]
+                              :tx-ops [[:xtdb.api/put {:xt/id "noop"}]]})]
       (is (= 400 (:status resp))))))
 
 (deftest write-expansion-gate
@@ -37,7 +37,7 @@
                               :required-keys #{:id}
                               :expansion {:feature :beta}
                               :allowed-expansions #{:alpha}
-                              :tx-ops [{:op :noop}]})]
+                              :tx-ops [[:xtdb.api/put {:xt/id "noop"}]]})]
       (is (= 400 (:status resp))))))
 
 (deftest write-success
@@ -47,7 +47,7 @@
                               :allowed-penholders #{"alice"}
                               :model {:id 1}
                               :required-keys #{:id}
-                              :tx-ops [{:op :noop}]})]
+                              :tx-ops [[:xtdb.api/put {:xt/id "noop"}]]})]
       (is (= 200 (:status resp)))
       (is (= "tx-ok" (get-in resp [:body :tx-id])))
       (is (string? (get-in resp [:body :path/id]))))))
@@ -61,7 +61,7 @@
                               :allowed-tooling #{"ops"}
                               :model {:id 1}
                               :required-keys #{:id}
-                              :tx-ops [{:op :noop}]})]
+                              :tx-ops [[:xtdb.api/put {:xt/id "noop"}]]})]
       (is (= 403 (:status resp))))))
 
 (deftest write-tooling-allowed
@@ -73,5 +73,5 @@
                               :allowed-tooling #{"cli"}
                               :model {:id 1}
                               :required-keys #{:id}
-                              :tx-ops [{:op :noop}]})]
+                              :tx-ops [[:xtdb.api/put {:xt/id "noop"}]]})]
       (is (= 200 (:status resp))))))
