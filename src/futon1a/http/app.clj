@@ -579,6 +579,77 @@
               resp (routes/entity-by-id {:node node :id eid})]
           (response req (:status resp) (:body resp)))
 
+        ;; Evidence landscape endpoints
+        (and (= request-method :get) (= uri "/api/alpha/evidence"))
+        (let [db (xtdb/db node)
+              qtype (some-> (get query-params "type") normalize-type)
+              qclaim (some-> (get query-params "claim-type") normalize-type)
+              qsubject-type (some-> (get query-params "subject-type") normalize-type)
+              qsubject-id (get query-params "subject-id")
+              qsession (get query-params "session-id")
+              qauthor (get query-params "author")
+              qsince (get query-params "since")
+              qlimit (when-let [s (get query-params "limit")]
+                       (try (Integer/parseInt s) (catch Exception _ nil)))
+              ;; Base query: all evidence entries
+              base-where '[[e :evidence/id id]
+                           [e :evidence/at at]]
+              ;; Build additional where clauses from params
+              extra-where (cond-> []
+                            qtype (conj ['e :evidence/type qtype])
+                            qclaim (conj ['e :evidence/claim-type qclaim])
+                            qsession (conj ['e :evidence/session-id qsession])
+                            qauthor (conj ['e :evidence/author qauthor]))
+              where-clauses (vec (concat base-where extra-where))
+              query {:find '[(pull e [*])]
+                     :where where-clauses}
+              results (->> (xtdb/q db query)
+                           (map first)
+                           (map #(dissoc % :xt/id))
+                           ;; Post-filter for subject (nested map)
+                           (filter (fn [e]
+                                     (and (or (nil? qsubject-type)
+                                              (= qsubject-type (get-in e [:evidence/subject :ref/type])))
+                                          (or (nil? qsubject-id)
+                                              (= qsubject-id (get-in e [:evidence/subject :ref/id]))))))
+                           ;; Post-filter for since
+                           (filter (fn [e]
+                                     (or (nil? qsince)
+                                         (>= (compare (str (:evidence/at e)) qsince) 0))))
+                           ;; Sort newest first
+                           (sort-by :evidence/at #(compare %2 %1))
+                           ;; Apply limit
+                           ((fn [xs] (if (and qlimit (pos? qlimit)) (take qlimit xs) xs)))
+                           vec)]
+          (response req 200 {:entries results :count (count results)}))
+
+        (and (= request-method :get)
+             (str/starts-with? uri "/api/alpha/evidence/")
+             (str/ends-with? uri "/chain"))
+        (let [eid (-> uri
+                      (subs (count "/api/alpha/evidence/"))
+                      (str/replace #"/chain$" ""))
+              db (xtdb/db node)]
+          (loop [id eid acc [] seen #{}]
+            (if (or (nil? id) (str/blank? id) (contains? seen id))
+              (response req 200 {:chain (vec (reverse acc))})
+              (let [doc (xtdb/entity db id)]
+                (if doc
+                  (let [entry (dissoc doc :xt/id)]
+                    (recur (:evidence/in-reply-to entry)
+                           (conj acc entry)
+                           (conj seen id)))
+                  (response req 200 {:chain (vec (reverse acc))}))))))
+
+        (and (= request-method :get)
+             (str/starts-with? uri "/api/alpha/evidence/"))
+        (let [eid (subs uri (count "/api/alpha/evidence/"))
+              db (xtdb/db node)
+              doc (when (seq eid) (xtdb/entity db eid))]
+          (if (and doc (:evidence/id doc))
+            (response req 200 (dissoc doc :xt/id))
+            (response req 404 {:error "not found" :evidence/id eid})))
+
         (= request-method :get)
         (not-found req)
 
