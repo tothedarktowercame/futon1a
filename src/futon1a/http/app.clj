@@ -712,6 +712,19 @@
         :else
         (method-not-allowed req #{:get :post})))))
 
+(defn- wrap-index-html
+  "Rewrite directory-style URIs (trailing /) to serve index.html.
+   Without this, wrap-content-type sees no file extension on the URI
+   and defaults to application/octet-stream even when wrap-file correctly
+   resolves index.html from the directory."
+  [handler dir]
+  (fn [req]
+    (let [uri (:uri req)]
+      (if (and (str/ends-with? uri "/")
+               (.isFile (File. ^String dir ^String (str (subs uri 1) "index.html"))))
+        (handler (assoc req :uri (str uri "index.html")))
+        (handler req)))))
+
 (defn wrap-static
   "Optionally wrap handler to serve static files from dir.
    Returns handler unchanged when dir is nil or not a directory."
@@ -719,5 +732,6 @@
   (if (and dir (.isDirectory (File. ^String dir)))
     (-> handler
         (file-mw/wrap-file dir {:allow-symlinks? true})
+        (wrap-index-html dir)
         (ct-mw/wrap-content-type))
     handler))
