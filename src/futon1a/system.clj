@@ -53,18 +53,19 @@
    - node, store
    - http/server, http/port, http/handler
    - stop! (fn [] => stopped-system)"
-  [{:keys [data-dir port allowed-penholders allowed-expansions allowed-tooling]
+  [{:keys [data-dir port static-dir allowed-penholders allowed-expansions allowed-tooling]
     :or {port 7071}
     :as opts}]
   (let [compat-penholder (get opts :compat/penholder)
         node (xtnode/start-node! (xtdb-config {:data-dir data-dir}))
         store (xtnode/xtdb-store node)
-        handler (http-app/ring-handler {:node node
-                                        :store store
-                                        :allowed-penholders (or allowed-penholders #{})
-                                        :allowed-expansions (or allowed-expansions #{})
-                                        :allowed-tooling (or allowed-tooling #{})
-                                        :compat/penholder compat-penholder})
+        handler (-> (http-app/ring-handler {:node node
+                                            :store store
+                                            :allowed-penholders (or allowed-penholders #{})
+                                            :allowed-expansions (or allowed-expansions #{})
+                                            :allowed-tooling (or allowed-tooling #{})
+                                            :compat/penholder compat-penholder})
+                    (http-app/wrap-static static-dir))
         server (jetty/run-jetty handler {:port port :join? false})
         actual-port (jetty-port server)
         sys {:node node
@@ -98,22 +99,26 @@
    Env vars:
    - FUTON1A_DATA_DIR (required)
    - FUTON1A_PORT (optional, default 7071)
-   - FUTON1A_ALLOWED_PENHOLDERS (optional, comma-separated)"
+   - FUTON1A_ALLOWED_PENHOLDERS (optional, comma-separated)
+   - FUTON1A_STATIC_DIR (optional, serves static files from this directory)"
   [& _args]
   (let [data-dir (System/getenv "FUTON1A_DATA_DIR")
         port (some-> (System/getenv "FUTON1A_PORT") parse-long)
+        static-dir (some-> (System/getenv "FUTON1A_STATIC_DIR") str/trim not-empty)
         allowed (parse-allowed-penholders (System/getenv "FUTON1A_ALLOWED_PENHOLDERS"))
         compat-ph (some-> (System/getenv "FUTON1A_COMPAT_PENHOLDER") str/trim not-empty)
         sys (start! {:data-dir data-dir
                      :port (or port 7071)
+                     :static-dir static-dir
                      :allowed-penholders allowed
                      :allowed-expansions #{}
                      :allowed-tooling #{}
                      :compat/penholder compat-ph})]
     (println "futon1a up"
-             {:http {:port (:http/port sys)}
-              :xtdb {:data-dir (get-in sys [:config :data-dir])}
-              :allowed-penholders (vec (sort (get-in sys [:config :allowed-penholders])) )})
+             (cond-> {:http {:port (:http/port sys)}
+                      :xtdb {:data-dir (get-in sys [:config :data-dir])}
+                      :allowed-penholders (vec (sort (get-in sys [:config :allowed-penholders])))}
+               static-dir (assoc :static-dir static-dir)))
     (println "try:"
              (str "curl -s -H 'accept: application/edn' http://127.0.0.1:" (:http/port sys) "/health"))
     (flush)

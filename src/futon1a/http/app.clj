@@ -14,9 +14,12 @@
             [clojure.string :as str]
             [cheshire.core :as json]
             [futon1a.api.routes :as routes]
+            [ring.middleware.content-type :as ct-mw]
+            [ring.middleware.file :as file-mw]
             [ring.util.codec :as codec]
             [ring.util.response :as resp]
-            [xtdb.api :as xtdb]))
+            [xtdb.api :as xtdb])
+  (:import [java.io File]))
 
 (defn- url-decode
   "Decode a URL-encoded path segment."
@@ -708,3 +711,13 @@
 
         :else
         (method-not-allowed req #{:get :post})))))
+
+(defn wrap-static
+  "Optionally wrap handler to serve static files from dir.
+   Returns handler unchanged when dir is nil or not a directory."
+  [handler dir]
+  (if (and dir (.isDirectory (File. ^String dir)))
+    (-> handler
+        (file-mw/wrap-file dir {:allow-symlinks? true})
+        (ct-mw/wrap-content-type))
+    handler))
