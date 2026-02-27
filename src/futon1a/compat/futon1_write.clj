@@ -161,3 +161,101 @@
                 :provenance prov}]
     {:doc doc
      :relation public}))
+
+;; --- Hyperedge ---------------------------------------------------------------
+
+(defn- normalize-endpoint
+  "Accept either a string entity-id or a map with :role/:entity/:passage.
+   Returns a normalized map {:role kw, :entity-id str, ...}."
+  [node v]
+  (cond
+    (string? v)
+    (let [s (normalize-text v)]
+      (when s {:entity-id s}))
+
+    (map? v)
+    (let [entity-id (or (normalize-text (:entity-id v))
+                        (normalize-text (:id v))
+                        (when-let [name (normalize-text (:name v))]
+                          (some-> (entity-by-name node name) :entity/id str))
+                        (when-let [article (:article v)]
+                          (or (normalize-text (:article/ident article))
+                              (normalize-text (:article/name article))))
+                        (when-let [entity (:entity v)]
+                          (or (normalize-text (:id entity))
+                              (normalize-text (:entity/id entity))
+                              (when-let [n (normalize-text (:name entity))]
+                                (some-> (entity-by-name node n) :entity/id str)))))
+          role (some-> (or (:role v) (:hx/role v)) normalize-type)
+          passage (normalize-text (or (:passage v) (:hx/passage v)))]
+      (when entity-id
+        (cond-> {:entity-id entity-id}
+          role (assoc :role role)
+          passage (assoc :passage passage))))
+
+    :else nil))
+
+(defn- stable-hyperedge-id
+  [{:keys [hx-type endpoint-ids]}]
+  (str "hx:"
+       (if (keyword? hx-type) (subs (str hx-type) 1) (str hx-type)) ":"
+       (str/join "." (sort endpoint-ids))))
+
+(defn upsert-hyperedge-doc
+  "Build a Futon1-style hyperedge doc from a request payload.
+
+   Accepts both flat string endpoints (futon1a compat) and rich endpoint maps
+   (futon1 Nelson-style with :role, :entity, :passage).
+
+   Payload:
+   {:hx/type keyword-or-string  ;; REQUIRED
+    :hx/endpoints [...]          ;; REQUIRED — strings or maps
+    :type string                 ;; optional outer type tag
+    :props map                   ;; optional properties
+    :hx/content map              ;; optional content
+    :hx/labels [keyword]         ;; optional labels
+    :hx/confidence number}       ;; optional
+
+   Returns {:doc <xtdb-doc> :hyperedge <public-shape>}."
+  [{:keys [node payload]}]
+  (let [hx-type (normalize-type (or (:hx/type payload) (:type payload)))
+        raw-endpoints (or (:hx/endpoints payload) (:endpoints payload))
+        _ (when-not hx-type
+            (throw (ex-info "hx/type required"
+                            {:hx/type (:hx/type payload) :type (:type payload)})))
+        _ (when-not (and (sequential? raw-endpoints) (seq raw-endpoints))
+            (throw (ex-info "hx/endpoints must be a non-empty list"
+                            {:hx/endpoints raw-endpoints})))
+        endpoints (mapv (fn [ep]
+                          (or (normalize-endpoint node ep)
+                              (throw (ex-info "unresolvable endpoint"
+                                              {:endpoint ep}))))
+                        raw-endpoints)
+        endpoint-ids (mapv :entity-id endpoints)
+        props (or (:props payload) (:hx/props payload))
+        content (or (:hx/content payload) (:content payload))
+        labels (when-let [ls (or (:hx/labels payload) (:labels payload))]
+                 (mapv normalize-type ls))
+        confidence (:hx/confidence payload)
+        requested-id (normalize-text (or (:hx/id payload) (:id payload)))
+        hx-id (or requested-id
+                   (stable-hyperedge-id {:hx-type hx-type :endpoint-ids endpoint-ids}))
+        doc (cond-> {:xt/id hx-id
+                     :hx/id hx-id
+                     :hx/type hx-type
+                     :hx/endpoints endpoint-ids
+                     :hx/ends endpoints}
+              props (assoc :hx/props props)
+              content (assoc :hx/content content)
+              (seq labels) (assoc :hx/labels labels)
+              (some? confidence) (assoc :hx/confidence confidence))
+        public (cond-> {:hx/id hx-id
+                        :hx/type hx-type
+                        :hx/endpoints endpoint-ids
+                        :hx/ends endpoints}
+                 props (assoc :hx/props props)
+                 content (assoc :hx/content content)
+                 (seq labels) (assoc :hx/labels labels)
+                 (some? confidence) (assoc :hx/confidence confidence))]
+    {:doc doc
+     :hyperedge public}))

@@ -335,6 +335,50 @@
                                                          :payload payload})]
           (response req (:status resp) (:body resp)))
 
+        ;; Hyperedge write (futon1 parity — accepts both flat and rich endpoints)
+        (and (= request-method :post) (= uri "/api/alpha/hyperedge"))
+        (let [payload body-map
+              penholder (compat-penholder system req payload)
+              resp (routes/compat-upsert-hyperedge {:node node
+                                                    :store store
+                                                    :penholder penholder
+                                                    :allowed-penholders (or allowed-penholders #{})
+                                                    :profile (get-in req [:headers "x-profile"])
+                                                    :payload payload})]
+          (response req (:status resp) (:body resp)))
+
+        ;; /api alias for Arxana store bridge (futon4 targets /api/hyperedge).
+        (and (= request-method :post) api-uri (= api-uri "/hyperedge"))
+        (let [payload body-map
+              penholder (compat-penholder system req payload)
+              resp (routes/compat-upsert-hyperedge {:node node
+                                                    :store store
+                                                    :penholder penholder
+                                                    :allowed-penholders (or allowed-penholders #{})
+                                                    :profile (get-in req [:headers "x-profile"])
+                                                    :payload payload})]
+          (response req (:status resp) (:body resp)))
+
+        ;; Hyperedge read by ID
+        (and (= request-method :get)
+             (str/starts-with? uri "/api/alpha/hyperedge/"))
+        (let [hx-id (url-decode (subs uri (count "/api/alpha/hyperedge/")))
+              resp (routes/hyperedge-by-id {:node node :id hx-id})]
+          (response req (:status resp) (:body resp)))
+
+        ;; Hyperedge query (by type or by endpoint)
+        (and (= request-method :get) (= uri "/api/alpha/hyperedges"))
+        (let [qtype (get query-params "type")
+              qend (get query-params "end")
+              qlimit (when-let [s (get query-params "limit")]
+                       (try (Integer/parseInt s) (catch Exception _ nil)))
+              resp (cond
+                     qtype (routes/hyperedges-by-type {:node node :hx-type qtype :limit qlimit})
+                     qend (routes/hyperedges-by-end {:node node :end-id qend :limit qlimit})
+                     :else {:status 400
+                            :body {:error "type or end parameter required"}})]
+          (response req (:status resp) (:body resp)))
+
         ;; Arxana media surface (expects /api prefix, not /api/alpha)
         (and (= request-method :post) (= uri "/api/media/lyrics"))
         (let [payload body-map

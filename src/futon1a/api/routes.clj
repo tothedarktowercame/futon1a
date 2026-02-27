@@ -648,3 +648,89 @@
   (with-error-handling
     (require-keys! req #{:prev :next :label})
     (ok (repair/verify-repair! req))))
+
+;; --- Hyperedge endpoints -----------------------------------------------------
+
+(defn compat-upsert-hyperedge
+  "Futon1 API parity: POST /hyperedge (under /api/alpha or /api).
+
+   Accepts both flat string endpoints (futon1a compat):
+     {:hx/type \"link/refers-to\" :hx/endpoints [\"eid-a\" \"eid-b\"]}
+
+   And rich Nelson-style endpoint maps (futon1 parity):
+     {:hx/type :link/refers-to
+      :hx/endpoints [{:role :source :entity {:id \"eid-a\"}}
+                      {:role :target :entity {:id \"eid-b\"}}]}
+
+   Writes via the full pipeline (L4→L0)."
+  [{:keys [node store penholder allowed-penholders profile payload]}]
+  (with-error-handling
+    (require-keys! {:node node :store store :penholder penholder :allowed-penholders allowed-penholders}
+                   #{:node :store :penholder :allowed-penholders})
+    (let [{:keys [doc hyperedge]} (f1w/upsert-hyperedge-doc {:node node :payload payload})
+          result (pipeline/run-write!
+                  {:store store
+                   :penholder penholder
+                   :allowed-penholders allowed-penholders
+                   :model {}
+                   :identity nil
+                   :tx-ops [[:xtdb.api/put doc]]
+                   :claim {:op :compat/futon1-hyperedge}
+                   :detail {:hx/type (:hx/type payload)}})]
+      (ok {:profile (or profile "default")
+           :hyperedge hyperedge
+           :tx-id (:tx-id result)
+           :path/id (get-in result [:path :path/id])}))))
+
+(defn hyperedge-by-id
+  "GET /api/alpha/hyperedge/:id — fetch a single hyperedge by its :hx/id."
+  [{:keys [node id]}]
+  (with-error-handling
+    (let [db (xtdb/db node)
+          doc (when (seq id) (xtdb/entity db id))]
+      (if (and doc (:hx/id doc))
+        (ok (dissoc doc :xt/id))
+        {:status 404
+         :body {:error "not found" :hx/id id}}))))
+
+(defn hyperedges-by-type
+  "GET /api/alpha/hyperedges?type=... — query hyperedges by :hx/type."
+  [{:keys [node hx-type limit]}]
+  (with-error-handling
+    (let [db (xtdb/db node)
+          type-kw (when hx-type (normalize-type hx-type))
+          _ (when-not type-kw
+              (throw (ex-info "type parameter required" {:type hx-type})))
+          results (->> (xtdb/q db '{:find [(pull e [*])]
+                                    :in [t]
+                                    :where [[e :hx/type t]]}
+                               type-kw)
+                       (map first)
+                       (map #(dissoc % :xt/id))
+                       (sort-by #(str (:hx/id %)))
+                       vec)
+          results (if (and limit (pos? limit))
+                    (vec (take limit results))
+                    results)]
+      (ok {:hyperedges results :count (count results)}))))
+
+(defn hyperedges-by-end
+  "GET /api/alpha/hyperedges?end=... — query hyperedges that include an endpoint."
+  [{:keys [node end-id limit]}]
+  (with-error-handling
+    (let [db (xtdb/db node)
+          _ (when-not (seq end-id)
+              (throw (ex-info "end parameter required" {:end end-id})))
+          ;; Query :hx/endpoints (flat string vector) for the endpoint id
+          results (->> (xtdb/q db '{:find [(pull e [*])]
+                                    :in [eid]
+                                    :where [[e :hx/endpoints eid]]}
+                               end-id)
+                       (map first)
+                       (map #(dissoc % :xt/id))
+                       (sort-by #(str (:hx/id %)))
+                       vec)
+          results (if (and limit (pos? limit))
+                    (vec (take limit results))
+                    results)]
+      (ok {:hyperedges results :count (count results)}))))
