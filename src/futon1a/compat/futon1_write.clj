@@ -182,10 +182,18 @@
                           (or (normalize-text (:article/ident article))
                               (normalize-text (:article/name article))))
                         (when-let [entity (:entity v)]
-                          (or (normalize-text (:id entity))
-                              (normalize-text (:entity/id entity))
-                              (when-let [n (normalize-text (:name entity))]
-                                (some-> (entity-by-name node n) :entity/id str)))))
+                          (cond
+                            (string? entity)
+                            (normalize-text entity)
+
+                            (map? entity)
+                            (or (normalize-text (:id entity))
+                                (normalize-text (:entity/id entity))
+                                (when-let [n (normalize-text (:name entity))]
+                                  (some-> (entity-by-name node n) :entity/id str)))
+
+                            :else
+                            nil)))
           role (some-> (or (:role v) (:hx/role v)) normalize-type)
           passage (normalize-text (or (:passage v) (:hx/passage v)))]
       (when entity-id

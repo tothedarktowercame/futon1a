@@ -121,6 +121,40 @@
         (finally
           ((:stop! sys1)))))))
 
+(deftest hyperedge-futon4-endpoint-shape
+  (testing "POST /api/alpha/hyperedge accepts futon4-style endpoint maps with :entity strings"
+    (let [dir (temp-dir)
+          client (http-client)
+          sys1 (sys/start! {:data-dir dir
+                            :port 0
+                            :allowed-penholders #{"tester"}})
+          base (str "http://127.0.0.1:" (:http/port sys1))]
+      (try
+        (let [e-a (http-post-edn client (str base "/api/alpha/entity")
+                                 {:penholder "tester"
+                                  :name "f4-shape-a"
+                                  :type "arxana/article"})
+              e-b (http-post-edn client (str base "/api/alpha/entity")
+                                 {:penholder "tester"
+                                  :name "f4-shape-b"
+                                  :type "arxana/article"})
+              eid-a (get-in e-a [:body :entity :id])
+              eid-b (get-in e-b [:body :entity :id])
+              w (http-post-edn client (str base "/api/alpha/hyperedge")
+                               {:penholder "tester"
+                                :hx/type ":hx/transclusion"
+                                :hx/endpoints [{:role ":role/source" :entity eid-a}
+                                               {:role ":role/target" :entity eid-b}]
+                                :props {:label "futon4 shape probe"}})]
+          (is (= 200 (:status w)))
+          (let [hx (get-in w [:body :hyperedge])]
+            (is (= :hx/transclusion (:hx/type hx)))
+            (is (= [eid-a eid-b] (:hx/endpoints hx)))
+            (is (= :role/source (get-in hx [:hx/ends 0 :role])))
+            (is (= :role/target (get-in hx [:hx/ends 1 :role])))))
+        (finally
+          ((:stop! sys1)))))))
+
 (deftest hyperedge-query-by-type
   (testing "GET /api/alpha/hyperedges?type=... returns matching hyperedges"
     (let [dir (temp-dir)
