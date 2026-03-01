@@ -143,6 +143,21 @@
     (when (and (string? uri) (str/starts-with? uri prefix))
       (subs uri (count prefix)))))
 
+(defn- path-segments
+  "Split a path-like string into URL-decoded, non-empty segments."
+  [s]
+  (->> (str/split (or s "") #"/")
+       (remove str/blank?)
+       (mapv url-decode)))
+
+(defn- alpha-docbook-route
+  "If alpha URI is under /docs/:book, return {:book :segments}; else nil."
+  [alpha-uri]
+  (when-let [[_ raw-book tail] (and alpha-uri
+                                    (re-matches #"^/docs/([^/]+)(?:/(.*))?$" alpha-uri))]
+    {:book (url-decode raw-book)
+     :segments (path-segments tail)}))
+
 (defn- normalize-type
   [t]
   (cond
@@ -195,10 +210,10 @@
   (fn [req]
     (let [{:keys [request-method uri]} req
           body-map (when (#{:post :put :patch} request-method) (parse-body req))
-          query-params (when (= request-method :get)
-                         (codec/form-decode (or (:query-string req) "")))
+          query-params (codec/form-decode (or (:query-string req) ""))
           alpha-uri (alpha-strip uri)
           api-uri (api-strip uri)
+          docbook-route (alpha-docbook-route alpha-uri)
           base-req (merge body-map
                           {:store store
                            :allowed-penholders (or allowed-penholders #{})
@@ -443,6 +458,87 @@
                                                 :allowed-penholders (or allowed-penholders #{})
                                                 :profile (get-in req [:headers "x-profile"])
                                                 :payload payload})]
+          (response req (:status resp) (:body resp)))
+
+        ;; Futon1/Futon4 docbook compatibility surface.
+        (and (= request-method :get) docbook-route (= ["contents"] (:segments docbook-route)))
+        (let [resp (routes/compat-docbook-contents {:node node
+                                                    :book (:book docbook-route)})]
+          (response req (:status resp) (:body resp)))
+
+        (and (= request-method :get) docbook-route (= ["toc"] (:segments docbook-route)))
+        (let [resp (routes/compat-docbook-toc {:node node
+                                               :book (:book docbook-route)})]
+          (response req (:status resp) (:body resp)))
+
+        (and (= request-method :post) docbook-route (= ["contents" "order"] (:segments docbook-route)))
+        (let [payload body-map
+              penholder (compat-penholder system req payload)
+              resp (routes/compat-docbook-update-order {:node node
+                                                        :store store
+                                                        :penholder penholder
+                                                        :allowed-penholders (or allowed-penholders #{})
+                                                        :book (:book docbook-route)
+                                                        :payload payload})]
+          (response req (:status resp) (:body resp)))
+
+        (and (= request-method :post) docbook-route (= ["entry"] (:segments docbook-route)))
+        (let [payload body-map
+              penholder (compat-penholder system req payload)
+              resp (routes/compat-docbook-entry {:store store
+                                                 :penholder penholder
+                                                 :allowed-penholders (or allowed-penholders #{})
+                                                 :book (:book docbook-route)
+                                                 :payload payload})]
+          (response req (:status resp) (:body resp)))
+
+        (and (= request-method :post) docbook-route (= ["entries"] (:segments docbook-route)))
+        (let [payload body-map
+              penholder (compat-penholder system req payload)
+              resp (routes/compat-docbook-entries {:store store
+                                                   :penholder penholder
+                                                   :allowed-penholders (or allowed-penholders #{})
+                                                   :book (:book docbook-route)
+                                                   :payload payload})]
+          (response req (:status resp) (:body resp)))
+
+        (and (= request-method :get) docbook-route (= "heading" (first (:segments docbook-route)))
+             (= 2 (count (:segments docbook-route))))
+        (let [[_ doc-id] (:segments docbook-route)
+              resp (routes/compat-docbook-heading {:node node
+                                                   :book (:book docbook-route)
+                                                   :doc-id doc-id})]
+          (response req (:status resp) (:body resp)))
+
+        (and (= request-method :get) docbook-route (= ["recent"] (:segments docbook-route)))
+        (let [resp (routes/compat-docbook-recent {:node node
+                                                  :book (:book docbook-route)
+                                                  :limit (get query-params "limit")})]
+          (response req (:status resp) (:body resp)))
+
+        (and (= request-method :delete) docbook-route (= "doc" (first (:segments docbook-route)))
+             (= 2 (count (:segments docbook-route))))
+        (let [[_ doc-id] (:segments docbook-route)
+              penholder (compat-penholder system req body-map)
+              resp (routes/compat-docbook-delete-doc {:node node
+                                                      :store store
+                                                      :penholder penholder
+                                                      :allowed-penholders (or allowed-penholders #{})
+                                                      :book (:book docbook-route)
+                                                      :doc-id doc-id})]
+          (response req (:status resp) (:body resp)))
+
+        (and (= request-method :delete) docbook-route (= "toc" (first (:segments docbook-route)))
+             (= 2 (count (:segments docbook-route))))
+        (let [[_ doc-id] (:segments docbook-route)
+              penholder (compat-penholder system req body-map)
+              resp (routes/compat-docbook-delete-toc {:node node
+                                                      :store store
+                                                      :penholder penholder
+                                                      :allowed-penholders (or allowed-penholders #{})
+                                                      :book (:book docbook-route)
+                                                      :doc-id doc-id
+                                                      :cascade? (get query-params "cascade")})]
           (response req (:status resp) (:body resp)))
 
         (and (= request-method :post) (= uri "/api/alpha/lab/session"))
@@ -798,7 +894,7 @@
         (not-found req)
 
         :else
-        (method-not-allowed req #{:get :post})))))
+        (method-not-allowed req #{:get :post :delete})))))
 
 (defn- wrap-index-html
   "Rewrite directory-style URIs (trailing /) to serve index.html.
