@@ -15,7 +15,10 @@
 (deftest backfill-promotes-prototypes
   (testing "devmap/prototype -> pattern/library + includes + sigil link"
     (let [dir (temp-dir)
-          sys1 (sys/start! {:data-dir dir :port 0 :allowed-penholders #{"tester"}})
+          sys1 (sys/start! {:data-dir dir
+                            :port 0
+                            :allowed-penholders #{"tester"}
+                            :expose-internals? true})
           node (:node sys1)
           store (:store sys1)]
       (try
@@ -49,4 +52,3 @@
             (is (= 1 (count rels)))))
         (finally
           ((:stop! sys1)))))))
-

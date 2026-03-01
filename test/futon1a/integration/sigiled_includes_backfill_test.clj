@@ -47,7 +47,8 @@
           client (http-client)
           sys1 (sys/start! {:data-dir dir
                             :port 0
-                            :allowed-penholders #{"tester"}})
+                            :allowed-penholders #{"tester"}
+                            :expose-internals? true})
           base (str "http://127.0.0.1:" (:http/port sys1))]
       (try
         ;; Seed a pattern + sigil edge but no includes.
@@ -88,4 +89,3 @@
 
         (finally
           ((:stop! sys1)))))))
-

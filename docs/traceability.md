@@ -24,7 +24,9 @@ Tests:       test/futon1a/layer0/durability_gate_test.clj
              test/futon1a/invariants/proof_path_test.clj
              test/futon1a/stress/durability_stress_test.clj
              test/futon1a/integration/xtdb_integration_test.clj
+             test/futon1a/integration/arxana_compat_write_http_test.clj
 Doc:         docs/layer0-durability.md
+             docs/evidence/arxana-store-qa-2026-02-08.md
 Error:       {:error/layer 0, :error/status 503, :error/reason :durability-failure}
 ```
 

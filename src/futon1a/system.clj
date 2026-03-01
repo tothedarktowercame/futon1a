@@ -43,43 +43,84 @@
           (first)
           (.getLocalPort)))
 
+(defn- parse-bool
+  "Parse common truthy/falsey env strings. Unset => default."
+  [s default]
+  (if (nil? s)
+    default
+    (let [v (-> s str str/trim str/lower-case)]
+      (not (contains? #{"0" "false" "no" "off"} v)))))
+
+(defn- normalize-penholders
+  [allowed]
+  (->> (or allowed #{})
+       (keep (fn [v]
+               (let [s (some-> v str str/trim)]
+                 (when (seq s) s))))
+       (set)))
+
+(defn- validate-start-policy!
+  [{:keys [allowed-penholders allow-empty-penholders? compat-penholder]}]
+  (when (and (empty? allowed-penholders) (not allow-empty-penholders?))
+    (throw (ex-info "allowed-penholders required"
+                    {:error {:reason :missing-allowed-penholders
+                             :context {:hint "Set FUTON1A_ALLOWED_PENHOLDERS (e.g. api,joe)."
+                                       :allow-empty-penholders? false}}})))
+  (when (and compat-penholder
+             (not (contains? allowed-penholders compat-penholder)))
+    (throw (ex-info "compat/penholder must be allowed"
+                    {:error {:reason :invalid-compat-penholder
+                             :context {:compat/penholder compat-penholder
+                                       :allowed-penholders (vec (sort allowed-penholders))}}}))))
+
 (defn start!
   "Start the system.
 
-   Inputs:
-   - data-dir (string) XTDB persistence directory
-   - port (int, optional) default 7071; use 0 for ephemeral
-   - allowed-penholders (set of strings)
+  Inputs:
+  - data-dir (string) XTDB persistence directory
+  - port (int, optional) default 7071; use 0 for ephemeral
+  - allowed-penholders (set of strings)
+  - allow-empty-penholders? (boolean, optional) default false
+  - expose-internals? (boolean, optional) default false
 
    Returns a system map with:
-   - node, store
    - http/server, http/port, http/handler
+   - node, store (only when expose-internals? true)
    - stop! (fn [] => stopped-system)"
-  [{:keys [data-dir port static-dir allowed-penholders allowed-expansions allowed-tooling]
-    :or {port 7071}
+  [{:keys [data-dir port static-dir allowed-penholders allowed-expansions allowed-tooling
+           allow-empty-penholders? expose-internals?]
+    :or {port 7071
+         allow-empty-penholders? false
+         expose-internals? false}
     :as opts}]
-  (let [compat-penholder (get opts :compat/penholder)
+  (let [allowed-penholders (normalize-penholders allowed-penholders)
+        compat-penholder (some-> (get opts :compat/penholder) str/trim not-empty)
+        _ (validate-start-policy! {:allowed-penholders allowed-penholders
+                                   :allow-empty-penholders? allow-empty-penholders?
+                                   :compat-penholder compat-penholder})
         node (xtnode/start-node! (xtdb-config {:data-dir data-dir}))
         store (xtnode/xtdb-store node)
         handler (-> (http-app/ring-handler {:node node
                                             :store store
-                                            :allowed-penholders (or allowed-penholders #{})
+                                            :data-dir data-dir
+                                            :allowed-penholders allowed-penholders
                                             :allowed-expansions (or allowed-expansions #{})
                                             :allowed-tooling (or allowed-tooling #{})
                                             :compat/penholder compat-penholder})
                     (http-app/wrap-static static-dir))
         server (jetty/run-jetty handler {:port port :join? false})
         actual-port (jetty-port server)
-        sys {:node node
-             :store store
-             :http/server server
+        sys (cond-> {:http/server server
              :http/port actual-port
              :http/handler handler
              :config {:data-dir data-dir
                       :port port
-                      :allowed-penholders (or allowed-penholders #{})
+                      :allowed-penholders allowed-penholders
                       :allowed-expansions (or allowed-expansions #{})
-                      :allowed-tooling (or allowed-tooling #{})}}]
+                      :allowed-tooling (or allowed-tooling #{})
+                      :allow-empty-penholders? allow-empty-penholders?
+                      :expose-internals? expose-internals?}}
+              expose-internals? (assoc :node node :store store))]
     (assoc sys
            :stop! (fn []
                     (try
@@ -101,24 +142,28 @@
    Env vars:
    - FUTON1A_DATA_DIR (required)
    - FUTON1A_PORT (optional, default 7071)
-   - FUTON1A_ALLOWED_PENHOLDERS (optional, comma-separated)
+   - FUTON1A_ALLOWED_PENHOLDERS (required by default, comma-separated)
+   - FUTON1A_ALLOW_EMPTY_PENHOLDERS (optional, default false)
    - FUTON1A_STATIC_DIR (optional, serves static files from this directory)"
   [& _args]
   (let [data-dir (System/getenv "FUTON1A_DATA_DIR")
         port (some-> (System/getenv "FUTON1A_PORT") parse-long)
         static-dir (some-> (System/getenv "FUTON1A_STATIC_DIR") str/trim not-empty)
         allowed (parse-allowed-penholders (System/getenv "FUTON1A_ALLOWED_PENHOLDERS"))
+        allow-empty? (parse-bool (System/getenv "FUTON1A_ALLOW_EMPTY_PENHOLDERS") false)
         compat-ph (some-> (System/getenv "FUTON1A_COMPAT_PENHOLDER") str/trim not-empty)
         sys (start! {:data-dir data-dir
                      :port (or port 7071)
                      :static-dir static-dir
                      :allowed-penholders allowed
+                     :allow-empty-penholders? allow-empty?
                      :allowed-expansions #{}
                      :allowed-tooling #{}
                      :compat/penholder compat-ph})]
     (println "futon1a up"
              (cond-> {:http {:port (:http/port sys)}
                       :xtdb {:data-dir (get-in sys [:config :data-dir])}
+                      :allow-empty-penholders? (get-in sys [:config :allow-empty-penholders?])
                       :allowed-penholders (vec (sort (get-in sys [:config :allowed-penholders])))}
                static-dir (assoc :static-dir static-dir)))
     (println "try:"
