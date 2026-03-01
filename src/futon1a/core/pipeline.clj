@@ -42,6 +42,11 @@
                             {:error (mv/layer4-error :identity-multiple-xt-ids
                                                      {:xt/ids ids})})))))
 
+(defn- resolve-proof-log-path
+  [store explicit-proof-log-path]
+  (or explicit-proof-log-path
+      (:proof-log-path (meta store))))
+
 (defn run-write!
   "Run a write through Layers 4 → 0.
 
@@ -58,7 +63,7 @@
    Returns {:ok? true :tx-id <string> :path <proof-path>} or throws.
   "
   [{:keys [store penholder allowed-penholders model required-keys identity tx-ops claim detail
-           expansion allowed-expansions tooling allowed-tooling]}]
+           expansion allowed-expansions tooling allowed-tooling proof-log-path]}]
   ;; Layer 4 — model validation (400)
   (expansion/expansion-gate! {:expansion expansion
                               :allowed-expansions (or allowed-expansions #{})})
@@ -116,20 +121,22 @@
                           [:xtdb.api/put doc])))
         ;; Always ensure the index doc is present on success, even when idempotent.
         tx-ops (cond-> (vec tx-ops)
-                 identity-op (conj identity-op))]
-  ;; Layer 0 — durable write (503)
-    (let [docs (tx-ops->docs tx-ops)
-          type-ops (types/tx-ops-for-docs docs)
-          tx-ops (into (vec type-ops) tx-ops)
-          {:keys [tx-id path]} (xt/durable-write-tx!
-                                {:store store
-                                 :actor penholder
-                                 :claim (or claim {:op :write})
-                                 :detail (or detail {:layer :pipeline})
-                                 :tx-ops tx-ops})]
-      {:ok? true
-       :tx-id tx-id
-       :path path})))
+                 identity-op (conj identity-op))
+        ;; Layer 0 — durable write (503)
+        docs (tx-ops->docs tx-ops)
+        type-ops (types/tx-ops-for-docs docs)
+        tx-ops (into (vec type-ops) tx-ops)
+        {:keys [tx-id path]} (xt/durable-write-tx!
+                              {:store store
+                               :actor penholder
+                               :claim (or claim {:op :write})
+                               :detail (or detail {:layer :pipeline})
+                               :tx-ops tx-ops
+                               :proof-log-path (resolve-proof-log-path store proof-log-path)})]
+    {:ok? true
+     :tx-id tx-id
+     :path/id (get-in path [:path/id])
+     :path path}))
 
 (defn run-open-world!
   "Run an open-world ingest through L4 → L3 → L2 → L0.
@@ -150,7 +157,7 @@
   "
   [{:keys [store penholder allowed-penholders tooling allowed-tooling
            entities relations require-model? tx-ops claim detail
-           expansion allowed-expansions]}]
+           expansion allowed-expansions proof-log-path]}]
   (expansion/expansion-gate! {:expansion expansion
                               :allowed-expansions (or allowed-expansions #{})})
   (when-not (vector? tx-ops)
@@ -180,8 +187,10 @@
                                :actor penholder
                                :claim (or claim {:op :ingest})
                                :detail (or detail {:layer :ingest})
-                               :tx-ops tx-ops})]
+                               :tx-ops tx-ops
+                               :proof-log-path (resolve-proof-log-path store proof-log-path)})]
     {:ok? true
      :counts (:counts ingest)
      :tx-id tx-id
+     :path/id (get-in path [:path/id])
      :path path}))

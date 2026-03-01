@@ -784,6 +784,78 @@
         s (some-> s str/trim)]
     (when (seq s) s)))
 
+(defn compat-write-evidence
+  "Futon1a API: POST /api/alpha/evidence.
+
+   Writes evidence entries through the canonical pipeline so successful writes
+   always emit a proof-path id."
+  [{:keys [node store penholder allowed-penholders payload]}]
+  (with-error-handling
+    (require-keys! {:node node
+                    :store store
+                    :penholder penholder
+                    :allowed-penholders allowed-penholders
+                    :payload payload}
+                   #{:node :store :penholder :allowed-penholders :payload})
+    (let [eid (or (:evidence/id payload) (:id payload) (str (java.util.UUID/randomUUID)))
+          at (or (:evidence/at payload) (:at payload) (.toString (java.time.Instant/now)))
+          etype (normalize-type (or (:evidence/type payload) (:type payload)))
+          ctype (normalize-type (or (:evidence/claim-type payload) (:claim-type payload)))
+          author (or (:evidence/author payload) (:author payload))
+          ebody (or (:evidence/body payload) (:body payload))
+          subject (or (:evidence/subject payload) (:subject payload))]
+      (cond
+        (not etype)
+        {:status 400 :body {:error "evidence/type required"}}
+
+        (not ctype)
+        {:status 400 :body {:error "evidence/claim-type required"}}
+
+        (not author)
+        {:status 400 :body {:error "evidence/author required"}}
+
+        (xtdb/entity (xtdb/db node) eid)
+        {:status 409 :body {:error "duplicate evidence id" :evidence/id eid}}
+
+        :else
+        (let [entry (cond-> {:xt/id eid
+                             :evidence/id eid
+                             :evidence/at at
+                             :evidence/type etype
+                             :evidence/claim-type ctype
+                             :evidence/author author
+                             :evidence/body (or ebody {})
+                             :evidence/tags (vec (or (:evidence/tags payload) (:tags payload) []))}
+                      subject
+                      (assoc :evidence/subject subject)
+                      (or (:evidence/pattern-id payload) (:pattern-id payload))
+                      (assoc :evidence/pattern-id (or (:evidence/pattern-id payload) (:pattern-id payload)))
+                      (or (:evidence/session-id payload) (:session-id payload))
+                      (assoc :evidence/session-id (or (:evidence/session-id payload) (:session-id payload)))
+                      (or (:evidence/in-reply-to payload) (:in-reply-to payload))
+                      (assoc :evidence/in-reply-to (or (:evidence/in-reply-to payload) (:in-reply-to payload)))
+                      (or (:evidence/fork-of payload) (:fork-of payload))
+                      (assoc :evidence/fork-of (or (:evidence/fork-of payload) (:fork-of payload)))
+                      (some? (or (:evidence/conjecture? payload) (:conjecture? payload)))
+                      (assoc :evidence/conjecture? (boolean (or (:evidence/conjecture? payload) (:conjecture? payload))))
+                      (some? (or (:evidence/ephemeral? payload) (:ephemeral? payload)))
+                      (assoc :evidence/ephemeral? (boolean (or (:evidence/ephemeral? payload) (:ephemeral? payload))))
+                      )
+                result (pipeline/run-write! {:store store
+                                             :penholder penholder
+                                             :allowed-penholders allowed-penholders
+                                             :model {}
+                                             :identity nil
+                                             :tx-ops [[:xtdb.api/put entry]]
+                                             :claim {:op :compat/evidence-write}
+                                             :detail {:evidence/id eid}})]
+          {:status 201
+           :body {:ok true
+                  :evidence/id eid
+                  :entry (dissoc entry :xt/id)
+                  :tx-id (:tx-id result)
+                  :path/id (get-in result [:path :path/id])}})))))
+
 (defn- sha-from-id
   [id]
   (when-let [s (nonblank-str id)]

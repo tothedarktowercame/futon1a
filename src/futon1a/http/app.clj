@@ -770,55 +770,14 @@
 
         ;; POST /api/alpha/evidence — write an evidence entry
         (and (= request-method :post) (= uri "/api/alpha/evidence"))
-        (try
-          (let [body body-map
-                ;; Accept both namespaced and unqualified keys
-                eid (or (:evidence/id body) (:id body) (str (java.util.UUID/randomUUID)))
-                at (or (:evidence/at body) (:at body) (.toString (java.time.Instant/now)))
-                etype (normalize-type (or (:evidence/type body) (:type body)))
-                ctype (normalize-type (or (:evidence/claim-type body) (:claim-type body)))
-                author (or (:evidence/author body) (:author body))
-                ebody (or (:evidence/body body) (:body body))
-                subject (or (:evidence/subject body) (:subject body))
-                _ (when-not etype
-                    (throw (ex-info "evidence/type required" {:status 400})))
-                _ (when-not ctype
-                    (throw (ex-info "evidence/claim-type required" {:status 400})))
-                _ (when-not author
-                    (throw (ex-info "evidence/author required" {:status 400})))
-                ;; Build the entry
-                entry (cond-> {:xt/id eid
-                               :evidence/id eid
-                               :evidence/at at
-                               :evidence/type etype
-                               :evidence/claim-type ctype
-                               :evidence/author author
-                               :evidence/body (or ebody {})
-                               :evidence/tags (vec (or (:evidence/tags body) (:tags body) []))}
-                        subject
-                        (assoc :evidence/subject subject)
-                        (or (:evidence/pattern-id body) (:pattern-id body))
-                        (assoc :evidence/pattern-id (or (:evidence/pattern-id body) (:pattern-id body)))
-                        (or (:evidence/session-id body) (:session-id body))
-                        (assoc :evidence/session-id (or (:evidence/session-id body) (:session-id body)))
-                        (or (:evidence/in-reply-to body) (:in-reply-to body))
-                        (assoc :evidence/in-reply-to (or (:evidence/in-reply-to body) (:in-reply-to body)))
-                        (or (:evidence/fork-of body) (:fork-of body))
-                        (assoc :evidence/fork-of (or (:evidence/fork-of body) (:fork-of body)))
-                        (some? (or (:evidence/conjecture? body) (:conjecture? body)))
-                        (assoc :evidence/conjecture? (boolean (or (:evidence/conjecture? body) (:conjecture? body))))
-                        (some? (or (:evidence/ephemeral? body) (:ephemeral? body)))
-                        (assoc :evidence/ephemeral? (boolean (or (:evidence/ephemeral? body) (:ephemeral? body)))))
-                ;; Check for duplicate
-                db (xtdb/db node)]
-            (if (xtdb/entity db eid)
-              (response req 409 {:error "duplicate evidence id" :evidence/id eid})
-              (do
-                (xtdb/await-tx node (xtdb/submit-tx node [[::xtdb/put entry]]))
-                (response req 201 {:ok true :evidence/id eid :entry (dissoc entry :xt/id)}))))
-          (catch clojure.lang.ExceptionInfo e
-            (response req (or (:status (ex-data e)) 400)
-                      {:error (.getMessage e) :data (dissoc (ex-data e) :status)})))
+        (let [payload body-map
+              penholder (compat-penholder system req payload)
+              resp (routes/compat-write-evidence {:node node
+                                                  :store store
+                                                  :penholder penholder
+                                                  :allowed-penholders (or allowed-penholders #{})
+                                                  :payload payload})]
+          (response req (:status resp) (:body resp)))
 
         (and (= request-method :get) (= uri "/api/alpha/evidence"))
         (let [db (xtdb/db node)

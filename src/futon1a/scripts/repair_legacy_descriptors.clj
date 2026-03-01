@@ -94,20 +94,17 @@
        :repaired (count patched)
        :sample (vec (take 3 (map (fn [d] (select-keys d [:xt/id :entity/name :model/scope :schema/version :schema/certificate]))
                                  patched)))}
-      (if (empty? tx-ops)
-        {:ok? true :repaired 0 :tx-id "tx-noop"}
-        (let [resp (pipeline/run-write! {:store store
-                                         :penholder penholder
-                                         :allowed-penholders allowed-penholders
-                                         :model {}
-                                         :required-keys #{}
-                                         :identity nil
-                                         :tx-ops tx-ops
-                                         :claim {:op :repair/legacy-descriptors}
-                                         :detail {:layer :repair
-                                                  :count (count patched)}})]
-          {:ok? true
-           :repaired (count patched)
-           :tx-id (:tx-id resp)
-           :path/id (get-in resp [:path :path/id])})))))
-
+      (let [resp (pipeline/run-write! {:store store
+                                       :penholder penholder
+                                       :allowed-penholders allowed-penholders
+                                       :model {}
+                                       :required-keys #{}
+                                       :identity nil
+                                       :tx-ops tx-ops
+                                       :claim {:op :repair/legacy-descriptors}
+                                       :detail {:layer :repair
+                                                :count (count patched)}})]
+        {:ok? true
+         :repaired (count patched)
+         :tx-id (:tx-id resp)
+         :path/id (get-in resp [:path :path/id])}))))
