@@ -516,6 +516,7 @@
           (let [write-result (pipeline/run-write! {:store store
                                                    :penholder penholder
                                                    :allowed-penholders allowed-penholders
+                                                   :counter-ratchet {:allow-drop-classes #{:docbook}}
                                                    :model {}
                                                    :identity nil
                                                    :tx-ops tx-ops
@@ -551,6 +552,7 @@
           (let [write-result (pipeline/run-write! {:store store
                                                    :penholder penholder
                                                    :allowed-penholders allowed-penholders
+                                                   :counter-ratchet {:allow-drop-classes #{:docbook}}
                                                    :model {}
                                                    :identity nil
                                                    :tx-ops tx-ops

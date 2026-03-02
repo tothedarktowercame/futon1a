@@ -8,10 +8,11 @@
    Pattern:   storage/error-layer-hierarchy
    Theory:    futon-theory/error-hierarchy, futon-theory/stop-the-line"
   (:require [futon1a.auth.penholder :as auth]
-            [futon1a.core.entity :as ent]
-            [futon1a.core.identity :as id]
-            [futon1a.core.xtdb :as xt]
-            [futon1a.ingest.open-world :as open-world]
+    [futon1a.core.entity :as ent]
+    [futon1a.core.identity :as id]
+    [futon1a.core.invariants :as inv]
+    [futon1a.core.xtdb :as xt]
+    [futon1a.ingest.open-world :as open-world]
             [futon1a.model.type-registry :as types]
             [futon1a.model.expansion :as expansion]
             [futon1a.model.validation :as mv]))
@@ -63,7 +64,8 @@
    Returns {:ok? true :tx-id <string> :path <proof-path>} or throws.
   "
   [{:keys [store penholder allowed-penholders model required-keys identity tx-ops claim detail
-           expansion allowed-expansions tooling allowed-tooling proof-log-path]}]
+           expansion allowed-expansions tooling allowed-tooling proof-log-path
+           counter-ratchet]}]
   ;; Layer 4 — model validation (400)
   (expansion/expansion-gate! {:expansion expansion
                               :allowed-expansions (or allowed-expansions #{})})
@@ -126,6 +128,9 @@
         docs (tx-ops->docs tx-ops)
         type-ops (types/tx-ops-for-docs docs)
         tx-ops (into (vec type-ops) tx-ops)
+        _ (inv/enforce-counter-ratchet! {:store store
+                                         :tx-ops tx-ops
+                                         :allow-drop-classes (:allow-drop-classes (or counter-ratchet {}))})
         {:keys [tx-id path]} (xt/durable-write-tx!
                               {:store store
                                :actor penholder
@@ -157,7 +162,7 @@
   "
   [{:keys [store penholder allowed-penholders tooling allowed-tooling
            entities relations require-model? tx-ops claim detail
-           expansion allowed-expansions proof-log-path]}]
+           expansion allowed-expansions proof-log-path counter-ratchet]}]
   (expansion/expansion-gate! {:expansion expansion
                               :allowed-expansions (or allowed-expansions #{})})
   (when-not (vector? tx-ops)
@@ -182,6 +187,9 @@
         docs (tx-ops->docs tx-ops)
         type-ops (types/tx-ops-for-docs docs)
         tx-ops (into (vec type-ops) tx-ops)
+        _ (inv/enforce-counter-ratchet! {:store store
+                                         :tx-ops tx-ops
+                                         :allow-drop-classes (:allow-drop-classes (or counter-ratchet {}))})
         {:keys [tx-id path]} (xt/durable-write-tx!
                               {:store store
                                :actor penholder
