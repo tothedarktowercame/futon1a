@@ -83,36 +83,38 @@
                   :lyrics/skipped 0}]
       (if-let [line (.readLine r)]
         (let [line-no (inc line-no)
-              stats (update stats :lines inc)]
-          (try
-            (let [j (json/decode line true)
-                  ev (safe-read-edn (get j "edn"))
-                  t (:type ev)]
-              (cond
-                (and (= t :entity/upsert)
-                     (= :arxana/media-lyrics (get-in ev [:entity :type])))
-                (let [ent (:entity ev)
-                      id (lyrics-canonical-id ent)
-                      doc (entity->lyrics-doc ent)]
-                  (if (and id doc)
-                    (recur line-no (assoc active id doc) (update stats :lyrics/upserts inc))
-                    (recur line-no active (update stats :lyrics/skipped inc))))
+              stats0 (update stats :lines inc)
+              [next-active next-stats]
+              (try
+                (let [j (json/decode line true)
+                      ev (safe-read-edn (or (get j "edn") (:edn j)))
+                      t (:type ev)]
+                  (cond
+                    (and (= t :entity/upsert)
+                         (= :arxana/media-lyrics (get-in ev [:entity :type])))
+                    (let [ent (:entity ev)
+                          id (lyrics-canonical-id ent)
+                          doc (entity->lyrics-doc ent)]
+                      (if (and id doc)
+                        [(assoc active id doc) (update stats0 :lyrics/upserts inc)]
+                        [active (update stats0 :lyrics/skipped inc)]))
 
-                (and (= t :entity/retract)
-                     (= :arxana/media-lyrics (get-in ev [:entity :type])))
-                (let [ent (:entity ev)
-                      id (lyrics-canonical-id ent)]
-                  (if id
-                    (recur line-no (dissoc active id) (update stats :lyrics/retracts inc))
-                    (recur line-no active (update stats :lyrics/skipped inc))))
+                    (and (= t :entity/retract)
+                         (= :arxana/media-lyrics (get-in ev [:entity :type])))
+                    (let [ent (:entity ev)
+                          id (lyrics-canonical-id ent)]
+                      (if id
+                        [(dissoc active id) (update stats0 :lyrics/retracts inc)]
+                        [active (update stats0 :lyrics/skipped inc)]))
 
-                :else
-                (recur line-no active (update stats :events/ignored inc))))
-            (catch com.fasterxml.jackson.core.JsonParseException _
-              (recur line-no active (update stats :json/invalid inc)))
-            (catch Exception _
-              ;; If EDN parse fails or shape is unexpected, count and continue.
-              (recur line-no active (update stats :edn/invalid inc)))))
+                    :else
+                    [active (update stats0 :events/ignored inc)]))
+                (catch com.fasterxml.jackson.core.JsonParseException _
+                  [active (update stats0 :json/invalid inc)])
+                (catch Exception _
+                  ;; If EDN parse fails or shape is unexpected, count and continue.
+                  [active (update stats0 :edn/invalid inc)]))]
+          (recur line-no next-active next-stats))
         (let [docs (->> (vals active)
                         ;; Deterministic order for repeatability.
                         (sort-by :xt/id)
@@ -158,4 +160,3 @@
                :claim {:op :migrate/futon1-events-lyrics}
                :detail {:events-path events-path
                         :docs (count docs)}})))))
-

@@ -79,6 +79,7 @@
   Inputs:
   - data-dir (string) XTDB persistence directory
   - port (int, optional) default 7071; use 0 for ephemeral
+  - proof-log-path (string, optional) default <data-dir>/proof-path.log.edn
   - allowed-penholders (set of strings)
   - allow-empty-penholders? (boolean, optional) default false
   - expose-internals? (boolean, optional) default false
@@ -87,7 +88,7 @@
    - http/server, http/port, http/handler
    - node, store (only when expose-internals? true)
    - stop! (fn [] => stopped-system)"
-  [{:keys [data-dir port static-dir allowed-penholders allowed-expansions allowed-tooling
+  [{:keys [data-dir port static-dir proof-log-path allowed-penholders allowed-expansions allowed-tooling
            allow-empty-penholders? expose-internals?]
     :or {port 7071
          allow-empty-penholders? false
@@ -95,11 +96,15 @@
     :as opts}]
   (let [allowed-penholders (normalize-penholders allowed-penholders)
         compat-penholder (some-> (get opts :compat/penholder) str/trim not-empty)
+        proof-log-path (or proof-log-path
+                           (str (str/replace data-dir #"/+$" "") "/proof-path.log.edn"))
         _ (validate-start-policy! {:allowed-penholders allowed-penholders
                                    :allow-empty-penholders? allow-empty-penholders?
                                    :compat-penholder compat-penholder})
         node (xtnode/start-node! (xtdb-config {:data-dir data-dir}))
-        store (xtnode/xtdb-store node)
+        base-store (xtnode/xtdb-store node)
+        store (with-meta base-store (assoc (or (meta base-store) {})
+                                           :proof-log-path proof-log-path))
         handler (-> (http-app/ring-handler {:node node
                                             :store store
                                             :data-dir data-dir
@@ -115,6 +120,7 @@
              :http/handler handler
              :config {:data-dir data-dir
                       :port port
+                      :proof-log-path proof-log-path
                       :allowed-penholders allowed-penholders
                       :allowed-expansions (or allowed-expansions #{})
                       :allowed-tooling (or allowed-tooling #{})
@@ -144,17 +150,20 @@
    - FUTON1A_PORT (optional, default 7071)
    - FUTON1A_ALLOWED_PENHOLDERS (required by default, comma-separated)
    - FUTON1A_ALLOW_EMPTY_PENHOLDERS (optional, default false)
+   - FUTON1A_PROOF_LOG_PATH (optional, default <data-dir>/proof-path.log.edn)
    - FUTON1A_STATIC_DIR (optional, serves static files from this directory)"
   [& _args]
   (let [data-dir (System/getenv "FUTON1A_DATA_DIR")
         port (some-> (System/getenv "FUTON1A_PORT") parse-long)
         static-dir (some-> (System/getenv "FUTON1A_STATIC_DIR") str/trim not-empty)
+        proof-log-path (some-> (System/getenv "FUTON1A_PROOF_LOG_PATH") str/trim not-empty)
         allowed (parse-allowed-penholders (System/getenv "FUTON1A_ALLOWED_PENHOLDERS"))
         allow-empty? (parse-bool (System/getenv "FUTON1A_ALLOW_EMPTY_PENHOLDERS") false)
         compat-ph (some-> (System/getenv "FUTON1A_COMPAT_PENHOLDER") str/trim not-empty)
         sys (start! {:data-dir data-dir
                      :port (or port 7071)
                      :static-dir static-dir
+                     :proof-log-path proof-log-path
                      :allowed-penholders allowed
                      :allow-empty-penholders? allow-empty?
                      :allowed-expansions #{}
@@ -163,6 +172,7 @@
     (println "futon1a up"
              (cond-> {:http {:port (:http/port sys)}
                       :xtdb {:data-dir (get-in sys [:config :data-dir])}
+                      :proof-log-path (get-in sys [:config :proof-log-path])
                       :allow-empty-penholders? (get-in sys [:config :allow-empty-penholders?])
                       :allowed-penholders (vec (sort (get-in sys [:config :allowed-penholders])))}
                static-dir (assoc :static-dir static-dir)))

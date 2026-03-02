@@ -5,6 +5,7 @@
    Theory:   futon-theory/error-hierarchy (all handlers use with-error-handling)"
   (:require [clojure.string :as str]
             [futon1a.api.errors :as errors]
+            [futon1a.compat.futon1-docbook :as f1d]
             [futon1a.compat.futon1-graph :as f1g]
             [futon1a.compat.futon1-model :as f1m]
             [futon1a.compat.futon1-write :as f1w]
@@ -352,6 +353,221 @@
     (ok {:profile (or profile "default")
          :registry (f1g/patterns-registry node)})))
 
+;; --- Docbook parity endpoints -------------------------------------------------
+
+(defn- truthy-param?
+  [value]
+  (contains? #{"1" "true" "yes" "on"}
+             (some-> value str str/lower-case)))
+
+(defn compat-docbook-contents
+  "Futon1/Futon4 compatibility: GET /api/alpha/docs/:book/contents."
+  [{:keys [node book]}]
+  (with-error-handling
+    (require-keys! {:node node} #{:node})
+    (ok (f1d/contents node book))))
+
+(defn compat-docbook-toc
+  "Futon1/Futon4 compatibility: GET /api/alpha/docs/:book/toc."
+  [{:keys [node book]}]
+  (with-error-handling
+    (require-keys! {:node node} #{:node})
+    (ok (f1d/toc node book))))
+
+(defn compat-docbook-heading
+  "Futon1/Futon4 compatibility: GET /api/alpha/docs/:book/heading/:doc-id."
+  [{:keys [node book doc-id]}]
+  (with-error-handling
+    (require-keys! {:node node} #{:node})
+    (if-let [data (f1d/heading+entries node book doc-id)]
+      (ok data)
+      {:status 404
+       :body {:error "Heading not found"
+              :book (f1d/normalize-book book)
+              :doc-id doc-id}})))
+
+(defn compat-docbook-recent
+  "Futon1/Futon4 compatibility: GET /api/alpha/docs/:book/recent."
+  [{:keys [node book limit]}]
+  (with-error-handling
+    (require-keys! {:node node} #{:node})
+    (ok (f1d/recent-entries node book limit))))
+
+(defn compat-docbook-update-order
+  "Futon1/Futon4 compatibility: POST /api/alpha/docs/:book/contents/order."
+  [{:keys [node store penholder allowed-penholders book payload]}]
+  (with-error-handling
+    (require-keys! {:node node
+                    :store store
+                    :penholder penholder
+                    :allowed-penholders allowed-penholders
+                    :payload payload}
+                   #{:node :store :penholder :allowed-penholders :payload})
+    (let [order (:order payload)
+          source (:source payload)
+          timestamp (:timestamp payload)]
+      (if-not (and (sequential? order) (not (string? order)))
+        {:status 400
+         :body {:error "order must be a list of doc-ids"
+                :book (f1d/normalize-book book)}}
+        (let [{:keys [tx-ops response]} (f1d/prepare-update-toc-order node book {:order order
+                                                                                  :source source
+                                                                                  :timestamp timestamp})
+              write-result (pipeline/run-write! {:store store
+                                                 :penholder penholder
+                                                 :allowed-penholders allowed-penholders
+                                                 :model {}
+                                                 :identity nil
+                                                 :tx-ops tx-ops
+                                                 :claim {:op :compat/futon1-docbook-order}
+                                                 :detail {:book (f1d/normalize-book book)
+                                                          :count (count order)}})]
+          (ok (assoc response
+                     :tx-id (:tx-id write-result)
+                     :path/id (get-in write-result [:path :path/id]))))))))
+
+(defn compat-docbook-entry
+  "Futon1/Futon4 compatibility: POST /api/alpha/docs/:book/entry."
+  [{:keys [store penholder allowed-penholders book payload]}]
+  (with-error-handling
+    (require-keys! {:store store
+                    :penholder penholder
+                    :allowed-penholders allowed-penholders
+                    :payload payload}
+                   #{:store :penholder :allowed-penholders :payload})
+    (if-not (map? payload)
+      {:status 400
+       :body {:error "Expected entry payload object"
+              :book (f1d/normalize-book book)}}
+      (let [result (f1d/prepare-upsert-entry book payload)]
+        (if-not (:ok? result)
+          {:status 400
+           :body (dissoc result :ok? :tx-ops)}
+          (let [tx-ops (:tx-ops result)
+                write-result (pipeline/run-write! {:store store
+                                                   :penholder penholder
+                                                   :allowed-penholders allowed-penholders
+                                                   :model (select-keys (:entry result)
+                                                                       [:doc/id :doc/entry-id :doc/book])
+                                                   :required-keys #{:doc/id :doc/entry-id :doc/book}
+                                                   :identity nil
+                                                   :tx-ops tx-ops
+                                                   :claim {:op :compat/futon1-docbook-entry}
+                                                   :detail {:book (f1d/normalize-book book)
+                                                            :doc/id (:doc-id result)
+                                                            :entry-id (:entry-id result)}})
+                body (assoc (dissoc result :ok? :tx-ops)
+                            :tx-id (:tx-id write-result)
+                            :path/id (get-in write-result [:path :path/id]))]
+            (ok body)))))))
+
+(defn compat-docbook-entries
+  "Futon1/Futon4 compatibility: POST /api/alpha/docs/:book/entries."
+  [{:keys [store penholder allowed-penholders book payload]}]
+  (with-error-handling
+    (require-keys! {:store store
+                    :penholder penholder
+                    :allowed-penholders allowed-penholders
+                    :payload payload}
+                   #{:store :penholder :allowed-penholders :payload})
+    (let [entries (cond
+                    (sequential? payload) payload
+                    (and (map? payload) (sequential? (:entries payload))) (:entries payload)
+                    :else nil)]
+      (if-not (sequential? entries)
+        {:status 400
+         :body {:error "Expected entries list"
+                :book (f1d/normalize-book book)}}
+        (let [result (f1d/prepare-upsert-entries book entries)
+              tx-ops (:tx-ops result)
+              write-result (when (seq tx-ops)
+                             (pipeline/run-write! {:store store
+                                                   :penholder penholder
+                                                   :allowed-penholders allowed-penholders
+                                                   :model {}
+                                                   :identity nil
+                                                   :tx-ops tx-ops
+                                                   :claim {:op :compat/futon1-docbook-entries}
+                                                   :detail {:book (f1d/normalize-book book)
+                                                            :count (count entries)}}))
+              body (cond-> (dissoc result :ok? :tx-ops)
+                     write-result
+                     (assoc :tx-id (:tx-id write-result)
+                            :path/id (get-in write-result [:path :path/id])))]
+          (if (:ok? result)
+            (ok body)
+            {:status 400 :body body}))))))
+
+(defn compat-docbook-delete-doc
+  "Futon1/Futon4 compatibility: DELETE /api/alpha/docs/:book/doc/:doc-id."
+  [{:keys [node store penholder allowed-penholders book doc-id]}]
+  (with-error-handling
+    (require-keys! {:node node
+                    :store store
+                    :penholder penholder
+                    :allowed-penholders allowed-penholders}
+                   #{:node :store :penholder :allowed-penholders})
+    (if-not (seq (str doc-id))
+      {:status 400
+       :body {:error "doc-id required"
+              :book (f1d/normalize-book book)}}
+      (let [{:keys [deleted tx-ops] :as plan} (f1d/plan-delete-doc node book doc-id)]
+        (if (pos? deleted)
+          (let [write-result (pipeline/run-write! {:store store
+                                                   :penholder penholder
+                                                   :allowed-penholders allowed-penholders
+                                                   :counter-ratchet {:allow-drop-classes #{:docbook}}
+                                                   :model {}
+                                                   :identity nil
+                                                   :tx-ops tx-ops
+                                                   :claim {:op :compat/futon1-docbook-delete-doc}
+                                                   :detail {:book (f1d/normalize-book book)
+                                                            :doc/id doc-id
+                                                            :deleted deleted}})]
+            (ok (-> plan
+                    (dissoc :tx-ops)
+                    (assoc :tx-id (:tx-id write-result)
+                           :path/id (get-in write-result [:path :path/id])))))
+          {:status 404
+           :body (assoc (dissoc plan :tx-ops) :error "Doc not found")})))))
+
+(defn compat-docbook-delete-toc
+  "Futon1/Futon4 compatibility: DELETE /api/alpha/docs/:book/toc/:doc-id."
+  [{:keys [node store penholder allowed-penholders book doc-id cascade?]}]
+  (with-error-handling
+    (require-keys! {:node node
+                    :store store
+                    :penholder penholder
+                    :allowed-penholders allowed-penholders}
+                   #{:node :store :penholder :allowed-penholders})
+    (if-not (seq (str doc-id))
+      {:status 400
+       :body {:error "doc-id required"
+              :book (f1d/normalize-book book)}}
+      (let [cascade? (if (string? cascade?)
+                       (truthy-param? cascade?)
+                       (boolean cascade?))
+            {:keys [deleted tx-ops] :as plan} (f1d/plan-delete-toc node book doc-id {:cascade? cascade?})]
+        (if (pos? deleted)
+          (let [write-result (pipeline/run-write! {:store store
+                                                   :penholder penholder
+                                                   :allowed-penholders allowed-penholders
+                                                   :counter-ratchet {:allow-drop-classes #{:docbook}}
+                                                   :model {}
+                                                   :identity nil
+                                                   :tx-ops tx-ops
+                                                   :claim {:op :compat/futon1-docbook-delete-toc}
+                                                   :detail {:book (f1d/normalize-book book)
+                                                            :doc/id doc-id
+                                                            :deleted deleted
+                                                            :cascade? cascade?}})]
+            (ok (-> plan
+                    (dissoc :tx-ops)
+                    (assoc :tx-id (:tx-id write-result)
+                           :path/id (get-in write-result [:path :path/id])))))
+          {:status 404
+           :body (assoc (dissoc plan :tx-ops) :error "Doc not found")})))))
+
 (defn compat-ensure-entity
   "Futon1 API compatibility: POST /entity (under /api/alpha).
 
@@ -569,6 +785,78 @@
   (let [s (when (some? v) (str v))
         s (some-> s str/trim)]
     (when (seq s) s)))
+
+(defn compat-write-evidence
+  "Futon1a API: POST /api/alpha/evidence.
+
+   Writes evidence entries through the canonical pipeline so successful writes
+   always emit a proof-path id."
+  [{:keys [node store penholder allowed-penholders payload]}]
+  (with-error-handling
+    (require-keys! {:node node
+                    :store store
+                    :penholder penholder
+                    :allowed-penholders allowed-penholders
+                    :payload payload}
+                   #{:node :store :penholder :allowed-penholders :payload})
+    (let [eid (or (:evidence/id payload) (:id payload) (str (java.util.UUID/randomUUID)))
+          at (or (:evidence/at payload) (:at payload) (.toString (java.time.Instant/now)))
+          etype (normalize-type (or (:evidence/type payload) (:type payload)))
+          ctype (normalize-type (or (:evidence/claim-type payload) (:claim-type payload)))
+          author (or (:evidence/author payload) (:author payload))
+          ebody (or (:evidence/body payload) (:body payload))
+          subject (or (:evidence/subject payload) (:subject payload))]
+      (cond
+        (not etype)
+        {:status 400 :body {:error "evidence/type required"}}
+
+        (not ctype)
+        {:status 400 :body {:error "evidence/claim-type required"}}
+
+        (not author)
+        {:status 400 :body {:error "evidence/author required"}}
+
+        (xtdb/entity (xtdb/db node) eid)
+        {:status 409 :body {:error "duplicate evidence id" :evidence/id eid}}
+
+        :else
+        (let [entry (cond-> {:xt/id eid
+                             :evidence/id eid
+                             :evidence/at at
+                             :evidence/type etype
+                             :evidence/claim-type ctype
+                             :evidence/author author
+                             :evidence/body (or ebody {})
+                             :evidence/tags (vec (or (:evidence/tags payload) (:tags payload) []))}
+                      subject
+                      (assoc :evidence/subject subject)
+                      (or (:evidence/pattern-id payload) (:pattern-id payload))
+                      (assoc :evidence/pattern-id (or (:evidence/pattern-id payload) (:pattern-id payload)))
+                      (or (:evidence/session-id payload) (:session-id payload))
+                      (assoc :evidence/session-id (or (:evidence/session-id payload) (:session-id payload)))
+                      (or (:evidence/in-reply-to payload) (:in-reply-to payload))
+                      (assoc :evidence/in-reply-to (or (:evidence/in-reply-to payload) (:in-reply-to payload)))
+                      (or (:evidence/fork-of payload) (:fork-of payload))
+                      (assoc :evidence/fork-of (or (:evidence/fork-of payload) (:fork-of payload)))
+                      (some? (or (:evidence/conjecture? payload) (:conjecture? payload)))
+                      (assoc :evidence/conjecture? (boolean (or (:evidence/conjecture? payload) (:conjecture? payload))))
+                      (some? (or (:evidence/ephemeral? payload) (:ephemeral? payload)))
+                      (assoc :evidence/ephemeral? (boolean (or (:evidence/ephemeral? payload) (:ephemeral? payload))))
+                      )
+                result (pipeline/run-write! {:store store
+                                             :penholder penholder
+                                             :allowed-penholders allowed-penholders
+                                             :model {}
+                                             :identity nil
+                                             :tx-ops [[:xtdb.api/put entry]]
+                                             :claim {:op :compat/evidence-write}
+                                             :detail {:evidence/id eid}})]
+          {:status 201
+           :body {:ok true
+                  :evidence/id eid
+                  :entry (dissoc entry :xt/id)
+                  :tx-id (:tx-id result)
+                  :path/id (get-in result [:path :path/id])}})))))
 
 (defn- sha-from-id
   [id]

@@ -143,6 +143,21 @@
     (when (and (string? uri) (str/starts-with? uri prefix))
       (subs uri (count prefix)))))
 
+(defn- path-segments
+  "Split a path-like string into URL-decoded, non-empty segments."
+  [s]
+  (->> (str/split (or s "") #"/")
+       (remove str/blank?)
+       (mapv url-decode)))
+
+(defn- alpha-docbook-route
+  "If alpha URI is under /docs/:book, return {:book :segments}; else nil."
+  [alpha-uri]
+  (when-let [[_ raw-book tail] (and alpha-uri
+                                    (re-matches #"^/docs/([^/]+)(?:/(.*))?$" alpha-uri))]
+    {:book (url-decode raw-book)
+     :segments (path-segments tail)}))
+
 (defn- normalize-type
   [t]
   (cond
@@ -195,10 +210,10 @@
   (fn [req]
     (let [{:keys [request-method uri]} req
           body-map (when (#{:post :put :patch} request-method) (parse-body req))
-          query-params (when (= request-method :get)
-                         (codec/form-decode (or (:query-string req) "")))
+          query-params (codec/form-decode (or (:query-string req) ""))
           alpha-uri (alpha-strip uri)
           api-uri (api-strip uri)
+          docbook-route (alpha-docbook-route alpha-uri)
           base-req (merge body-map
                           {:store store
                            :allowed-penholders (or allowed-penholders #{})
@@ -445,6 +460,87 @@
                                                 :payload payload})]
           (response req (:status resp) (:body resp)))
 
+        ;; Futon1/Futon4 docbook compatibility surface.
+        (and (= request-method :get) docbook-route (= ["contents"] (:segments docbook-route)))
+        (let [resp (routes/compat-docbook-contents {:node node
+                                                    :book (:book docbook-route)})]
+          (response req (:status resp) (:body resp)))
+
+        (and (= request-method :get) docbook-route (= ["toc"] (:segments docbook-route)))
+        (let [resp (routes/compat-docbook-toc {:node node
+                                               :book (:book docbook-route)})]
+          (response req (:status resp) (:body resp)))
+
+        (and (= request-method :post) docbook-route (= ["contents" "order"] (:segments docbook-route)))
+        (let [payload body-map
+              penholder (compat-penholder system req payload)
+              resp (routes/compat-docbook-update-order {:node node
+                                                        :store store
+                                                        :penholder penholder
+                                                        :allowed-penholders (or allowed-penholders #{})
+                                                        :book (:book docbook-route)
+                                                        :payload payload})]
+          (response req (:status resp) (:body resp)))
+
+        (and (= request-method :post) docbook-route (= ["entry"] (:segments docbook-route)))
+        (let [payload body-map
+              penholder (compat-penholder system req payload)
+              resp (routes/compat-docbook-entry {:store store
+                                                 :penholder penholder
+                                                 :allowed-penholders (or allowed-penholders #{})
+                                                 :book (:book docbook-route)
+                                                 :payload payload})]
+          (response req (:status resp) (:body resp)))
+
+        (and (= request-method :post) docbook-route (= ["entries"] (:segments docbook-route)))
+        (let [payload body-map
+              penholder (compat-penholder system req payload)
+              resp (routes/compat-docbook-entries {:store store
+                                                   :penholder penholder
+                                                   :allowed-penholders (or allowed-penholders #{})
+                                                   :book (:book docbook-route)
+                                                   :payload payload})]
+          (response req (:status resp) (:body resp)))
+
+        (and (= request-method :get) docbook-route (= "heading" (first (:segments docbook-route)))
+             (= 2 (count (:segments docbook-route))))
+        (let [[_ doc-id] (:segments docbook-route)
+              resp (routes/compat-docbook-heading {:node node
+                                                   :book (:book docbook-route)
+                                                   :doc-id doc-id})]
+          (response req (:status resp) (:body resp)))
+
+        (and (= request-method :get) docbook-route (= ["recent"] (:segments docbook-route)))
+        (let [resp (routes/compat-docbook-recent {:node node
+                                                  :book (:book docbook-route)
+                                                  :limit (get query-params "limit")})]
+          (response req (:status resp) (:body resp)))
+
+        (and (= request-method :delete) docbook-route (= "doc" (first (:segments docbook-route)))
+             (= 2 (count (:segments docbook-route))))
+        (let [[_ doc-id] (:segments docbook-route)
+              penholder (compat-penholder system req body-map)
+              resp (routes/compat-docbook-delete-doc {:node node
+                                                      :store store
+                                                      :penholder penholder
+                                                      :allowed-penholders (or allowed-penholders #{})
+                                                      :book (:book docbook-route)
+                                                      :doc-id doc-id})]
+          (response req (:status resp) (:body resp)))
+
+        (and (= request-method :delete) docbook-route (= "toc" (first (:segments docbook-route)))
+             (= 2 (count (:segments docbook-route))))
+        (let [[_ doc-id] (:segments docbook-route)
+              penholder (compat-penholder system req body-map)
+              resp (routes/compat-docbook-delete-toc {:node node
+                                                      :store store
+                                                      :penholder penholder
+                                                      :allowed-penholders (or allowed-penholders #{})
+                                                      :book (:book docbook-route)
+                                                      :doc-id doc-id
+                                                      :cascade? (get query-params "cascade")})]
+          (response req (:status resp) (:body resp)))
+
         (and (= request-method :post) (= uri "/api/alpha/lab/session"))
         (try
           (let [body body-map
@@ -674,55 +770,14 @@
 
         ;; POST /api/alpha/evidence — write an evidence entry
         (and (= request-method :post) (= uri "/api/alpha/evidence"))
-        (try
-          (let [body body-map
-                ;; Accept both namespaced and unqualified keys
-                eid (or (:evidence/id body) (:id body) (str (java.util.UUID/randomUUID)))
-                at (or (:evidence/at body) (:at body) (.toString (java.time.Instant/now)))
-                etype (normalize-type (or (:evidence/type body) (:type body)))
-                ctype (normalize-type (or (:evidence/claim-type body) (:claim-type body)))
-                author (or (:evidence/author body) (:author body))
-                ebody (or (:evidence/body body) (:body body))
-                subject (or (:evidence/subject body) (:subject body))
-                _ (when-not etype
-                    (throw (ex-info "evidence/type required" {:status 400})))
-                _ (when-not ctype
-                    (throw (ex-info "evidence/claim-type required" {:status 400})))
-                _ (when-not author
-                    (throw (ex-info "evidence/author required" {:status 400})))
-                ;; Build the entry
-                entry (cond-> {:xt/id eid
-                               :evidence/id eid
-                               :evidence/at at
-                               :evidence/type etype
-                               :evidence/claim-type ctype
-                               :evidence/author author
-                               :evidence/body (or ebody {})
-                               :evidence/tags (vec (or (:evidence/tags body) (:tags body) []))}
-                        subject
-                        (assoc :evidence/subject subject)
-                        (or (:evidence/pattern-id body) (:pattern-id body))
-                        (assoc :evidence/pattern-id (or (:evidence/pattern-id body) (:pattern-id body)))
-                        (or (:evidence/session-id body) (:session-id body))
-                        (assoc :evidence/session-id (or (:evidence/session-id body) (:session-id body)))
-                        (or (:evidence/in-reply-to body) (:in-reply-to body))
-                        (assoc :evidence/in-reply-to (or (:evidence/in-reply-to body) (:in-reply-to body)))
-                        (or (:evidence/fork-of body) (:fork-of body))
-                        (assoc :evidence/fork-of (or (:evidence/fork-of body) (:fork-of body)))
-                        (some? (or (:evidence/conjecture? body) (:conjecture? body)))
-                        (assoc :evidence/conjecture? (boolean (or (:evidence/conjecture? body) (:conjecture? body))))
-                        (some? (or (:evidence/ephemeral? body) (:ephemeral? body)))
-                        (assoc :evidence/ephemeral? (boolean (or (:evidence/ephemeral? body) (:ephemeral? body)))))
-                ;; Check for duplicate
-                db (xtdb/db node)]
-            (if (xtdb/entity db eid)
-              (response req 409 {:error "duplicate evidence id" :evidence/id eid})
-              (do
-                (xtdb/await-tx node (xtdb/submit-tx node [[::xtdb/put entry]]))
-                (response req 201 {:ok true :evidence/id eid :entry (dissoc entry :xt/id)}))))
-          (catch clojure.lang.ExceptionInfo e
-            (response req (or (:status (ex-data e)) 400)
-                      {:error (.getMessage e) :data (dissoc (ex-data e) :status)})))
+        (let [payload body-map
+              penholder (compat-penholder system req payload)
+              resp (routes/compat-write-evidence {:node node
+                                                  :store store
+                                                  :penholder penholder
+                                                  :allowed-penholders (or allowed-penholders #{})
+                                                  :payload payload})]
+          (response req (:status resp) (:body resp)))
 
         (and (= request-method :get) (= uri "/api/alpha/evidence"))
         (let [db (xtdb/db node)
@@ -798,7 +853,7 @@
         (not-found req)
 
         :else
-        (method-not-allowed req #{:get :post})))))
+        (method-not-allowed req #{:get :post :delete})))))
 
 (defn- wrap-index-html
   "Rewrite directory-style URIs (trailing /) to serve index.html.

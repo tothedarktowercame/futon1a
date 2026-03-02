@@ -54,12 +54,14 @@ Built with PSR/PUR discipline:
 
 ## Status
 
-🚧 **In Development** - Part I (Process) phase
+🚧 **In Development** - Finish-line phase (F4 soak in progress)
 
 ## References
 
 - Mission: `futon3/holes/missions/M-futon1a-rebuild.md`
 - Work Plan: `futon3/holes/missions/M-futon1a-workplan.md`
 - Evidence: `futon3/holes/missions/M-futon1a-evidence.md`
+- Soak Runbook: `docs/soak-operations.md`
+- Soak Evidence Log: `docs/evidence/soak-2026-03-02-to-2026-04-01.md`
 - Theory: `futon3/library/futon-theory/`
 - Storage Patterns: `futon3/library/storage/`
