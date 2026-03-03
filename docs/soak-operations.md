@@ -73,6 +73,44 @@ Pass criteria:
   - condensed result map
   - incidents (if any)
 
+## Checkpoints
+
+Scheduled deeper assessments at soak midpoint and end.
+
+### Checkpoint 1 — Query Latency Baseline (mid-soak, ~Day 15)
+
+**Question:** Is XTDB-only fast enough, or does the data suggest adding
+a Datascript in-memory mirror?
+
+**Context:** The futon1 "double store" (XTDB + in-memory Datalog) was
+deliberately not ported to futon1a (see AGENTS.md: "Do NOT add Datascript
+mirror"). The `mirror.clj` stub exists but is unwired. This checkpoint
+produces the evidence to confirm or revisit that decision.
+
+**Method:**
+1. Seed the store with N entities (10, 100, 1000, 10000)
+2. At each scale, measure p50/p95/p99 latency for three query types:
+   - Single entity lookup (`GET /entity/:id`)
+   - Filtered query (e.g. all entities of a given type)
+   - Join query (e.g. entity + related evidence entries)
+3. Run each query type 100 times under 10 concurrent readers
+4. Record wall-clock times in the soak evidence log
+
+**Pass criteria:**
+- p95 < 50ms at current daily-use scale (~hundreds of entities)
+- p95 < 200ms at 10K entities
+
+**If pass:** XTDB-only confirmed. Document as evidence, close the
+mirror question for Prototype 1.
+
+**If fail:** Open a mission to wire `mirror.clj` as a read-through
+Datascript cache. The stub and protocol already exist.
+
+### Checkpoint 2 — End-of-Soak Summary (Day 30)
+
+Roll up daily audit results, incident ledger, and Checkpoint 1 findings
+into a single evidence entry. Assess overall readiness to exit F4.
+
 ## Stop-The-Line Conditions
 
 Treat soak as failed and escalate immediately when:
