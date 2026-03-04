@@ -7,7 +7,8 @@
 
    This is intentionally small and explicit: the goal is to prove the
    end-to-end restart cycle (I0) without special cases."
-  (:require [clojure.string :as str]
+  (:require [clojure.java.io :as io]
+            [clojure.string :as str]
             [futon1a.core.xtdb-node :as xtnode]
             [futon1a.http.app :as http-app]
             [ring.adapter.jetty :as jetty]))
@@ -25,9 +26,10 @@
   [{:keys [data-dir]}]
   (when-not (and (string? data-dir) (seq data-dir))
     (throw (ex-info "data-dir required" {:data-dir data-dir})))
-  (let [tx-log (str data-dir "/tx-log")
-        doc-store (str data-dir "/doc-store")
-        index-store (str data-dir "/index-store")
+  (let [base-dir (-> data-dir io/file .getAbsoluteFile)
+        tx-log (-> (io/file base-dir "tx-log") .toURI)
+        doc-store (-> (io/file base-dir "doc-store") .toURI)
+        index-store (-> (io/file base-dir "index-store") .toURI)
         kv {:kv-store {:xtdb/module 'xtdb.rocksdb/->kv-store}}]
     {:xtdb/tx-log (assoc-in kv [:kv-store :db-dir] tx-log)
      :xtdb/document-store (assoc-in kv [:kv-store :db-dir] doc-store)
