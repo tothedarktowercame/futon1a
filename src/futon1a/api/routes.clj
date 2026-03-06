@@ -11,6 +11,7 @@
             [futon1a.compat.futon1-write :as f1w]
             [futon1a.diag.health :as health]
             [futon1a.core.identity :as id]
+            [futon1a.core.invariants :as inv]
             [futon1a.model.descriptor-store :as dstore]
             [futon1a.model.registry :as registry]
             [futon1a.model.type-registry :as types]
@@ -670,8 +671,8 @@
             endpoint-docs (mapv (fn [eid]
                                   (or (f1g/fetch-entity node eid)
                                       (throw (ex-info "relation endpoint missing"
-                                                      {:error (futon1a.core.invariants/layer2-error :missing-endpoint
-                                                                              {:missing eid})}))))
+                                                      {:error (inv/layer2-error :missing-endpoint
+                                                                                {:missing eid})}))))
                                 endpoint-ids)
             entities (mapv (fn [d]
                              {:entity/id (or (:entity/id d) (:xt/id d))
@@ -699,78 +700,6 @@
              :relations public
              :tx-id (:tx-id result)
              :path/id (get-in result [:path :path/id])})))))
-
-(declare normalize-type)
-
-(defn- sha256-hex
-  [^String s]
-  (let [md (java.security.MessageDigest/getInstance "SHA-256")
-        bytes (.digest md (.getBytes (or s "") "UTF-8"))]
-    (apply str (map (fn [b] (format "%02x" (bit-and b 0xff))) bytes))))
-
-(defn compat-upsert-hyperedge
-  "Futon4 arxana-store surface: POST /hyperedge (under /api/alpha or /api).
-
-  Payload (JSON or EDN):
-  {:type \"arxana/hyperedge\"?        ; optional entity type
-   :hx/type \"arxana/...\"            ; required
-   :hx/endpoints [\"entity-id\" ...]  ; required, non-nil ids
-   :props {...}?}
-  "
-  [{:keys [node store penholder allowed-penholders profile payload]}]
-  (with-error-handling
-    (require-keys! {:node node :store store :penholder penholder :allowed-penholders allowed-penholders}
-                   #{:node :store :penholder :allowed-penholders})
-    (require-keys! payload #{:hx/type :hx/endpoints})
-    (let [hx-type (:hx/type payload)
-          endpoints (vec (:hx/endpoints payload))
-          _ (when-not (and (or (keyword? hx-type) (string? hx-type))
-                           (sequential? endpoints)
-                           (seq endpoints)
-                           (every? some? endpoints))
-              (throw (ex-info "invalid hyperedge payload"
-                              {:error (mv/layer4-error :invalid-hyperedge
-                                                       {:expected {:hx/type :string-or-keyword
-                                                                   :hx/endpoints :non-empty-seq-non-nil}
-                                                        :got (select-keys payload [:hx/type :hx/endpoints])})})))
-          db (xtdb/db node)
-          _ (doseq [eid endpoints]
-              (when-not (xtdb/entity db (str eid))
-                (throw (ex-info "hyperedge endpoint missing"
-                                {:error (futon1a.core.invariants/layer2-error :missing-endpoint
-                                                                             {:missing (str eid)
-                                                                              :hx/type hx-type})}))))
-          hx-type-s (if (keyword? hx-type) (subs (str hx-type) 1) (str hx-type))
-          eid (or (some-> (:id payload) str not-empty)
-                  (some-> (:entity/id payload) str not-empty)
-                  (str "arxana/hyperedge/" hx-type-s "/" (sha256-hex (pr-str endpoints))))
-          etype (normalize-type (or (:type payload) "arxana/hyperedge"))
-          doc (cond-> {:xt/id eid
-                       :entity/id eid
-                       :entity/type etype
-                       :entity/name (or (:name payload) (str "hyperedge " hx-type-s))
-                       :hx/type hx-type-s
-                       :hx/endpoints (mapv str endpoints)}
-                (map? (:props payload)) (assoc :props (:props payload)))
-          result (pipeline/run-open-world!
-                  {:store store
-                   :penholder penholder
-                   :allowed-penholders allowed-penholders
-                   :entities [{:entity/id eid :entity/type etype}]
-                   :relations []
-                   :require-model? false
-                   :tx-ops [[:xtdb.api/put doc]]
-                   :claim {:op :compat/arxana-hyperedge}
-                   :detail {:hx/type hx-type-s
-                            :hx/endpoints (count endpoints)}})]
-      (ok {:profile (or profile "default")
-           :ok? true
-           :hyperedge {:id eid
-                       :type (subs (str etype) 1)
-                       :hx/type hx-type-s
-                       :hx/endpoints (mapv str endpoints)}
-           :tx-id (:tx-id result)
-           :path/id (get-in result [:path :path/id])}))))
 
 (defn- normalize-type
   [v]
