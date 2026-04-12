@@ -138,11 +138,12 @@
         (some? prov) (assoc :provenance prov)))))
 
 (defn ego
-  "Return a Futon1-style ego view with outgoing links."
+  "Return a Futon1-style ego view with outgoing and incoming links."
   [node name]
   (let [db (xtdb/db node)
         src-doc (fetch-entity node name)
         src-id (or (:xt/id src-doc) name)
+        ;; Outgoing: this entity is the source
         q-src '{:find [(pull r [*])]
                 :in [src]
                 :where [[r :relation/type _]
@@ -151,19 +152,41 @@
                  :in [src]
                  :where [[r :relation/type _]
                          [r :relation/from src]]}
-        rels (->> (concat (map first (xtdb/q db q-src src-id))
-                          (map first (xtdb/q db q-from src-id)))
-                  (distinct)
-                  (vec))
-        outgoing (->> rels
+        ;; Incoming: this entity is the destination
+        q-dst '{:find [(pull r [*])]
+                :in [dst]
+                :where [[r :relation/type _]
+                        [r :relation/dst dst]]}
+        q-to '{:find [(pull r [*])]
+               :in [dst]
+               :where [[r :relation/type _]
+                        [r :relation/to dst]]}
+        out-rels (->> (concat (map first (xtdb/q db q-src src-id))
+                              (map first (xtdb/q db q-from src-id)))
+                      (distinct)
+                      (vec))
+        in-rels (->> (concat (map first (xtdb/q db q-dst src-id))
+                             (map first (xtdb/q db q-to src-id)))
+                     (distinct)
+                     (vec))
+        outgoing (->> out-rels
                       (keep (fn [r]
                               (when-let [dst (relation-dst-id r)]
                                 (when-let [dst-doc (xtdb/entity db dst)]
                                   {:relation (normalize-relation r)
                                    :entity (normalize-entity dst-doc)}))))
+                      (vec))
+        incoming (->> in-rels
+                      (keep (fn [r]
+                              (let [src (relation-src-id r)]
+                                (when (and src (not= src src-id))
+                                  (when-let [src-doc (xtdb/entity db src)]
+                                    {:relation (normalize-relation r)
+                                     :entity (normalize-entity src-doc)})))))
                       (vec))]
     {:entity (normalize-entity src-doc)
-     :outgoing outgoing}))
+     :outgoing outgoing
+     :incoming incoming}))
 
 (defn patterns-registry
   "Return a lightweight registry of pattern entities and relations.
