@@ -73,6 +73,7 @@
         external-id (normalize-text (:external-id payload))
         source (normalize-text (:source payload))
         requested-id (normalize-text (:id payload))
+        props (when (map? (:props payload)) (:props payload))
         existing (when name (entity-by-name node name type))
         entity-id (or (some-> existing :entity/id str)
                       requested-id
@@ -82,9 +83,11 @@
                      :entity/name name}
               type (assoc :entity/type type)
               external-id (assoc :entity/external-id external-id)
-              source (assoc :entity/source source))
-        public {:id entity-id :name name :type type
-                :external-id external-id :source source}]
+              source (assoc :entity/source source)
+              props (assoc :entity/props props))
+        public (cond-> {:id entity-id :name name :type type
+                        :external-id external-id :source source}
+                 props (assoc :props props))]
     {:doc doc
      :entity (-> public
                  (update :external-id (fn [v] (when (seq (str v)) v)))

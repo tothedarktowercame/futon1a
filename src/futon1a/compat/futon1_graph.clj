@@ -33,6 +33,7 @@
                :type type}
         (some? external-id) (assoc :external-id external-id)
         (some? source) (assoc :source source)
+        (some? (:entity/props doc)) (assoc :props (:entity/props doc))
         (some? sha) (assoc :media/sha256 sha)
         ;; include raw for debugging when values are missing
         (or (nil? id) (nil? name) (nil? type)) (assoc :_raw (select-keys doc
