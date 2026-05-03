@@ -10,6 +10,12 @@
       (.toFile)
       (.getAbsolutePath)))
 
+(defn- db-dir-uri-strings
+  [config]
+  {:tx-log (-> config :xtdb/tx-log :kv-store :db-dir str)
+   :document-store (-> config :xtdb/document-store :kv-store :db-dir str)
+   :index-store (-> config :xtdb/index-store :kv-store :db-dir str)})
+
 (deftest start-requires-allowed-penholders-by-default
   (testing "boot fails loudly when no allowed penholders are configured"
     (let [dir (temp-dir)]
@@ -52,3 +58,19 @@
                         :port 0
                         :allowed-penholders #{"api"}
                         :compat/penholder "joe"}))))))
+
+(deftest xtdb-config-emits-canonical-windows-file-uris
+  (doseq [{:keys [label data-dir expected]}
+          [{:label "drive-letter path"
+            :data-dir "C:\\futon1a\\data"
+            :expected {:tx-log "file:/C:/futon1a/data/tx-log"
+                       :document-store "file:/C:/futon1a/data/doc-store"
+                       :index-store "file:/C:/futon1a/data/index-store"}}
+           {:label "UNC path"
+            :data-dir "\\\\server\\share\\futon1a"
+            :expected {:tx-log "file:////server/share/futon1a/tx-log"
+                       :document-store "file:////server/share/futon1a/doc-store"
+                       :index-store "file:////server/share/futon1a/index-store"}}]]
+    (testing label
+      (is (= expected
+             (db-dir-uri-strings (sys/xtdb-config {:data-dir data-dir})))))))
