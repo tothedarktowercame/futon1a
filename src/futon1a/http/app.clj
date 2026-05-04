@@ -386,10 +386,16 @@
         (and (= request-method :get) (= uri "/api/alpha/hyperedges"))
         (let [qtype (get query-params "type")
               qend (get query-params "end")
+              qrepo (get query-params "repo")
+              qsource-file (get query-params "source-file")
               qlimit (when-let [s (get query-params "limit")]
                        (try (Integer/parseInt s) (catch Exception _ nil)))
               resp (cond
-                     qtype (routes/hyperedges-by-type {:node node :hx-type qtype :limit qlimit})
+                     qtype (routes/hyperedges-by-type {:node node
+                                                       :hx-type qtype
+                                                       :limit qlimit
+                                                       :repo qrepo
+                                                       :source-file qsource-file})
                      qend (routes/hyperedges-by-end {:node node :end-id qend :limit qlimit})
                      :else {:status 400
                             :body {:error "type or end parameter required"}})]
@@ -821,6 +827,148 @@
                            ((fn [xs] (if (and qlimit (pos? qlimit)) (take qlimit xs) xs)))
                            vec)]
           (response req 200 {:entries results :count (count results)}))
+
+        ;; GET /api/alpha/evidence/sessions — aggregator over the evidence
+        ;; landscape that returns per-session summary
+        ;; ({:session-id :count :types :latest-at :authors :first-at}
+        ;;  ...) directly from XTDB, so consumers (Arxana Browser
+        ;; evidence-sessions view, Stack HUD widgets) don't have to fetch
+        ;; the whole entry stream and group client-side.
+        ;;
+        ;; Replaces the prior pattern of GET /evidence?limit=N + group-by-
+        ;; session in the Emacs view, which capped at N most-recent entries
+        ;; and silently misrepresented older sessions' counts.
+        ;;
+        ;; Optional query params:
+        ;;   since=<iso-instant>  — restrict to sessions whose latest
+        ;;                          entry is at-or-after this timestamp.
+        ;;   limit=<int>          — cap result count (default unbounded).
+        ;;   author=<string>      — restrict to sessions where any entry
+        ;;                          carries this author.
+        (and (= request-method :get) (= uri "/api/alpha/evidence/sessions"))
+        (let [db (xtdb/db node)
+              qsince (get query-params "since")
+              qauthor (get query-params "author")
+              qlimit (when-let [s (get query-params "limit")]
+                       (try (Integer/parseInt s) (catch Exception _ nil)))
+              ;; Pull only the four small fields we need (id/session/at/type/author);
+              ;; avoiding (pull e [*]) keeps the result vector compact even
+              ;; for ~10k entries.
+              base-where '[[e :evidence/id _]
+                           [e :evidence/session-id sid]
+                           [e :evidence/at at]]
+              where-clauses (cond-> base-where
+                              qauthor (conj ['e :evidence/author qauthor]))
+              raw (xtdb/q db
+                          {:find '[sid at (pull e [:evidence/type :evidence/author])]
+                           :where where-clauses})
+              ;; Reshape to per-entry maps so reduce is straightforward.
+              entries (->> raw
+                           (map (fn [[sid at pulled]]
+                                  {:session-id sid
+                                   :at (str at)
+                                   :type (str (or (:evidence/type pulled) ""))
+                                   :author (str (or (:evidence/author pulled) ""))}))
+                           (filter (fn [e]
+                                     (or (nil? qsince)
+                                         (>= (compare (:at e) qsince) 0)))))
+              ;; Group by session-id; build summary per group.
+              ;; ISO-8601 timestamps are lexically orderable, so use
+              ;; clojure.core/compare directly rather than min-key/max-key
+              ;; (which require Number key fns).
+              sessions (->> entries
+                            (group-by :session-id)
+                            (map (fn [[sid items]]
+                                   (let [ats (map :at items)
+                                         sorted-ats (sort ats)
+                                         types (->> items
+                                                    (map :type)
+                                                    (remove str/blank?)
+                                                    distinct
+                                                    sort
+                                                    vec)
+                                         authors (->> items
+                                                      (map :author)
+                                                      (remove str/blank?)
+                                                      distinct
+                                                      sort
+                                                      vec)]
+                                     {:session-id sid
+                                      :count (count items)
+                                      :types types
+                                      :authors authors
+                                      :first-at (first sorted-ats)
+                                      :latest-at (last sorted-ats)})))
+                            (sort-by :latest-at #(compare %2 %1))
+                            ((fn [xs] (if (and qlimit (pos? qlimit)) (take qlimit xs) xs)))
+                            vec)]
+          (response req 200 {:window-since qsince
+                             :author-filter qauthor
+                             :total-sessions (count sessions)
+                             :total-entries (count entries)
+                             :sessions sessions}))
+
+        ;; GET /api/alpha/patterns/activation — projection over
+        ;; context-retrieval evidence: aggregate by pattern id and
+        ;; return per-pattern activations with original queries +
+        ;; back-pointers to the underlying turn evidence.
+        ;; Single source of truth for the Arxana Browser activation
+        ;; view, Stack HUD widget, and any agent-side curl probe.
+        (and (= request-method :get) (= uri "/api/alpha/patterns/activation"))
+        (let [db (xtdb/db node)
+              qsince (get query-params "since")
+              qlimit (when-let [s (get query-params "limit")]
+                       (try (Integer/parseInt s) (catch Exception _ nil)))
+              raw (->> (xtdb/q db '{:find [(pull e [*])]
+                                    :where [[e :evidence/id _]
+                                            [e :evidence/at _]]})
+                       (map first)
+                       (filter (fn [e]
+                                 (let [body (:evidence/body e)
+                                       ev (or (get body :event)
+                                              (get body "event"))]
+                                   (= ev "context-retrieval"))))
+                       (filter (fn [e]
+                                 (or (nil? qsince)
+                                     (>= (compare (str (:evidence/at e)) qsince) 0))))
+                       vec)
+              activations (mapcat
+                            (fn [e]
+                              (let [body (:evidence/body e)
+                                    results (or (get body :results)
+                                                (get body "results"))
+                                    qtext (str (or (get body :query)
+                                                   (get body "query")
+                                                   ""))]
+                                (for [r (or results [])]
+                                  {:id (or (get r :id) (get r "id"))
+                                   :title (or (get r :title) (get r "title"))
+                                   :score (or (get r :score) (get r "score"))
+                                   :at (str (:evidence/at e))
+                                   :session-id (:evidence/session-id e)
+                                   :evidence-id (:evidence/id e)
+                                   :agent-id (:evidence/author e)
+                                   :query (subs qtext 0 (min 240 (count qtext)))})))
+                            raw)
+              grouped (->> activations
+                           (group-by :id)
+                           (map (fn [[pid items]]
+                                  (let [scores (keep :score items)]
+                                    {:id pid
+                                     :title (some :title items)
+                                     :count (count items)
+                                     :avg-score (when (seq scores)
+                                                  (double (/ (reduce + 0.0 scores)
+                                                             (count scores))))
+                                     :last-fired (->> items (map :at) sort last)
+                                     :activations (vec (sort-by :at #(compare %2 %1) items))})))
+                           (sort-by :count #(compare %2 %1))
+                           ((fn [xs] (if (and qlimit (pos? qlimit)) (take qlimit xs) xs)))
+                           vec)]
+          (response req 200 {:window-since qsince
+                             :total-retrievals (count raw)
+                             :pattern-count (count grouped)
+                             :patterns grouped}))
 
         (and (= request-method :get)
              (str/starts-with? uri "/api/alpha/evidence/")
