@@ -796,6 +796,11 @@
               qsince (get query-params "since")
               qlimit (when-let [s (get query-params "limit")]
                        (try (Integer/parseInt s) (catch Exception _ nil)))
+              qtags (when-let [s (get query-params "tags")]
+                      (->> (str/split s #",")
+                           (map str/trim)
+                           (remove str/blank?)
+                           seq))
               ;; Base query: all evidence entries
               base-where '[[e :evidence/id id]
                            [e :evidence/at at]]
@@ -821,6 +826,19 @@
                            (filter (fn [e]
                                      (or (nil? qsince)
                                          (>= (compare (str (:evidence/at e)) qsince) 0))))
+                           ;; Post-filter for tags (AND semantics; tag matches
+                           ;; if a stored tag's name equals the requested
+                           ;; tag string, tolerant of keyword/string/symbol).
+                           (filter (fn [e]
+                                     (or (nil? qtags)
+                                         (let [stored (or (:evidence/tags e) [])
+                                               names (set (map (fn [t]
+                                                                 (cond
+                                                                   (keyword? t) (name t)
+                                                                   (symbol? t) (name t)
+                                                                   :else (str t)))
+                                                               stored))]
+                                           (every? (fn [t] (contains? names t)) qtags)))))
                            ;; Sort newest first
                            (sort-by :evidence/at #(compare %2 %1))
                            ;; Apply limit
