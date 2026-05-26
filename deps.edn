@@ -13,4 +13,12 @@
 
            ;; Migration tooling needs to be able to read futon1's LMDB-backed XTDB.
            ;; Keep it out of the default runtime classpath.
-           :migrate {:extra-deps {com.xtdb/xtdb-lmdb {:mvn/version "1.24.0"}}}}}
+           :migrate {:extra-deps {com.xtdb/xtdb-lmdb {:mvn/version "1.24.0"}}}
+
+           ;; HTTP-only ingest scripts that talk to the running server.
+           ;; Pulls in futon3a for the canonical flexiarg parser and
+           ;; http-kit for the client. Kept out of default runtime
+           ;; classpath so the server JVM stays minimal.
+           :ingest-flexiarg
+           {:extra-deps {futon3a/futon3a {:local/root "../futon3a"}
+                         http-kit/http-kit {:mvn/version "2.7.0"}}}}}

@@ -1029,18 +1029,24 @@
 
 (defn hyperedges-by-type
   "GET /api/alpha/hyperedges?type=... — query hyperedges by :hx/type."
-  [{:keys [node hx-type limit]}]
+  [{:keys [node hx-type limit repo source-file]}]
   (with-error-handling
     (let [db (xtdb/db node)
           type-kw (when hx-type (normalize-type hx-type))
           _ (when-not type-kw
               (throw (ex-info "type parameter required" {:type hx-type})))
+          prop-matches? (fn [h k expected]
+                          (or (nil? expected)
+                              (= expected (get-in h [:hx/props k]))
+                              (= expected (get-in h [:hx/props (name k)]))))
           results (->> (xtdb/q db '{:find [(pull e [*])]
                                     :in [t]
                                     :where [[e :hx/type t]]}
                                type-kw)
                        (map first)
                        (map #(dissoc % :xt/id))
+                       (filter #(prop-matches? % :repo repo))
+                       (filter #(prop-matches? % :source-file source-file))
                        (sort-by #(str (:hx/id %)))
                        vec)
           results (if (and limit (pos? limit))
@@ -1048,18 +1054,51 @@
                     results)]
       (ok {:hyperedges results :count (count results)}))))
 
+(def ^:private uuid-pattern
+  "Canonical UUID format `8-4-4-4-12` hex string."
+  #"(?i)^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
+
+(defn- resolve-end-id
+  "If END-ID is UUID-shaped, look up the corresponding entity and
+   return its `:entity/name` (the semantic identifier used by hyperedge
+   endpoints). Otherwise return END-ID unchanged.
+
+   Bridges the identifier gap between UUID-keyed entities and
+   semantic-string hyperedge endpoints. See README-conventions.md §4
+   for design rationale."
+  [db end-id]
+  (if (and (string? end-id)
+           (re-matches uuid-pattern end-id))
+    (let [entity (-> (xtdb/q db '{:find [(pull e [:entity/name])]
+                                  :in [eid]
+                                  :where [[e :entity/id eid]]}
+                             end-id)
+                     ffirst)
+          entity-name (:entity/name entity)]
+      (or entity-name end-id))
+    end-id))
+
 (defn hyperedges-by-end
-  "GET /api/alpha/hyperedges?end=... — query hyperedges that include an endpoint."
+  "GET /api/alpha/hyperedges?end=... — query hyperedges that include an endpoint.
+
+   Accepts either a semantic string identifier (the multi-watcher
+   writes vertex-id strings like `futon3-d/mission/weird-modernism`
+   into `:hx/endpoints`) or a UUID. UUIDs are resolved through the
+   entity store to find the corresponding `:entity/name`, then the
+   exact-string match runs against that name — so callers can pass
+   whichever identifier they hold."
   [{:keys [node end-id limit]}]
   (with-error-handling
     (let [db (xtdb/db node)
           _ (when-not (seq end-id)
               (throw (ex-info "end parameter required" {:end end-id})))
-          ;; Query :hx/endpoints (flat string vector) for the endpoint id
+          resolved-id (resolve-end-id db end-id)
+          ;; Query :hx/endpoints (flat string vector) for the (possibly
+          ;; resolved) endpoint id.
           results (->> (xtdb/q db '{:find [(pull e [*])]
                                     :in [eid]
                                     :where [[e :hx/endpoints eid]]}
-                               end-id)
+                               resolved-id)
                        (map first)
                        (map #(dissoc % :xt/id))
                        (sort-by #(str (:hx/id %)))
