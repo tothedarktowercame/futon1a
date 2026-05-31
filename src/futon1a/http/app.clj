@@ -1041,6 +1041,6 @@
   (if (and dir (.isDirectory (File. ^String dir)))
     (-> handler
         (file-mw/wrap-file dir {:allow-symlinks? true})
-        (wrap-index-html dir)
-        (ct-mw/wrap-content-type))
+        (ct-mw/wrap-content-type)
+        (wrap-index-html dir))
     handler))

@@ -13,6 +13,28 @@
             [futon1a.http.app :as http-app]
             [ring.adapter.jetty :as jetty]))
 
+(defn- windows-drive-path?
+  [s]
+  (boolean (re-matches #"(?i)^[A-Z]:[\\/].*" (or s ""))))
+
+(defn- unc-path?
+  [s]
+  (str/starts-with? (or s "") "\\\\"))
+
+(defn- child-db-uri
+  [data-dir child]
+  (let [joined (str (str/replace data-dir #"[\\/]+$" "") "/" child)
+        normalized (str/replace joined "\\" "/")]
+    (cond
+      (windows-drive-path? normalized)
+      (java.net.URI. "file" nil (str "/" normalized) nil)
+
+      (unc-path? data-dir)
+      (java.net.URI. "file" nil (str "//" normalized) nil)
+
+      :else
+      (-> joined io/file .getAbsoluteFile .toURI))))
+
 (defn xtdb-config
   "Build an embedded XTDB config with explicit on-disk dirs.
 
@@ -26,10 +48,9 @@
   [{:keys [data-dir]}]
   (when-not (and (string? data-dir) (seq data-dir))
     (throw (ex-info "data-dir required" {:data-dir data-dir})))
-  (let [base-dir (-> data-dir io/file .getAbsoluteFile)
-        tx-log (-> (io/file base-dir "tx-log") .toURI)
-        doc-store (-> (io/file base-dir "doc-store") .toURI)
-        index-store (-> (io/file base-dir "index-store") .toURI)
+  (let [tx-log (child-db-uri data-dir "tx-log")
+        doc-store (child-db-uri data-dir "doc-store")
+        index-store (child-db-uri data-dir "index-store")
         kv {:kv-store {:xtdb/module 'xtdb.rocksdb/->kv-store}}]
     {:xtdb/tx-log (assoc-in kv [:kv-store :db-dir] tx-log)
      :xtdb/document-store (assoc-in kv [:kv-store :db-dir] doc-store)
