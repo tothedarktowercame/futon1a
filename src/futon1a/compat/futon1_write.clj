@@ -75,8 +75,8 @@
         requested-id (normalize-text (:id payload))
         props (when (map? (:props payload)) (:props payload))
         existing (when name (entity-by-name node name type))
-        entity-id (or (some-> existing :entity/id str)
-                      requested-id
+        entity-id (or requested-id
+                      (some-> existing :entity/id str)
                       (uuid-str))
         doc (cond-> {:xt/id entity-id
                      :entity/id entity-id

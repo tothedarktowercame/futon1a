@@ -6,8 +6,7 @@
             [xtdb.api :as xtdb])
   (:import (java.net URI)
            (java.net.http HttpClient HttpRequest HttpRequest$BodyPublishers HttpResponse$BodyHandlers)
-           (java.nio.file Files Path)
-           (java.util Comparator)))
+           (java.nio.file Files Path)))
 
 (defn- temp-dir
   []
@@ -139,3 +138,66 @@
           (finally
             ((:stop! sys2))))))))
 
+(deftest compat-entity-explicit-id-wins-over-same-name
+  (testing "POST /api/alpha/entity writes the requested id even when name matches an existing entity"
+    (let [dir (temp-dir)
+          client (http-client)
+          sys1 (sys/start! {:data-dir dir
+                            :port 0
+                            :allowed-penholders #{"tester"}})
+          base (str "http://127.0.0.1:" (:http/port sys1))]
+      (try
+        (let [seed (http-post-edn client (str base "/api/alpha/entity")
+                                  {:penholder "tester"
+                                   :id "entity-Y"
+                                   :name "shared-name"
+                                   :type "test/entity"
+                                   :props {:marker "original"}})]
+          (is (= 200 (:status seed)))
+          (is (= "entity-Y" (get-in seed [:body :entity :id]))))
+
+        (let [explicit (http-post-edn client (str base "/api/alpha/entity")
+                                      {:penholder "tester"
+                                       :id "entity-X"
+                                       :name "shared-name"
+                                       :type "test/entity"
+                                       :props {:marker "requested"}})]
+          (is (= 200 (:status explicit)))
+          (is (= "entity-X" (get-in explicit [:body :entity :id]))))
+
+        (let [entity-x (http-get-edn client (str base "/api/alpha/entity/entity-X"))
+              entity-y (http-get-edn client (str base "/api/alpha/entity/entity-Y"))]
+          (is (= 200 (:status entity-x)))
+          (is (= 200 (:status entity-y)))
+          (is (= "requested" (get-in entity-x [:body :entity :props :marker])))
+          (is (= "original" (get-in entity-y [:body :entity :props :marker]))))
+
+        (finally
+          ((:stop! sys1)))))))
+
+(deftest compat-entity-idless-post-still-dedups-by-name
+  (testing "POST /api/alpha/entity without :id keeps Futon1 name-dedup behavior"
+    (let [dir (temp-dir)
+          client (http-client)
+          sys1 (sys/start! {:data-dir dir
+                            :port 0
+                            :allowed-penholders #{"tester"}})
+          base (str "http://127.0.0.1:" (:http/port sys1))]
+      (try
+        (let [seed (http-post-edn client (str base "/api/alpha/entity")
+                                  {:penholder "tester"
+                                   :id "entity-existing"
+                                   :name "idless-shared-name"
+                                   :type "test/entity"})]
+          (is (= 200 (:status seed)))
+          (is (= "entity-existing" (get-in seed [:body :entity :id]))))
+
+        (let [idless (http-post-edn client (str base "/api/alpha/entity")
+                                    {:penholder "tester"
+                                     :name "idless-shared-name"
+                                     :type "test/entity"})]
+          (is (= 200 (:status idless)))
+          (is (= "entity-existing" (get-in idless [:body :entity :id]))))
+
+        (finally
+          ((:stop! sys1)))))))
