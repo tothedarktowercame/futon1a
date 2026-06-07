@@ -137,6 +137,76 @@
         (some? label) (assoc :label label)
         (some? prov) (assoc :provenance prov)))))
 
+(defn- hyperedge-endpoint-ids
+  [h]
+  (let [from-ends (->> (:hx/ends h)
+                       (keep :entity-id)
+                       (seq))]
+    (vec (or from-ends (:hx/endpoints h) []))))
+
+(defn- normalize-hyperedge-relation
+  [h]
+  (cond-> {:type (normalize-type (:hx/type h))}
+    (some? (:hx/id h)) (assoc :hyperedge-id (:hx/id h))
+    (some? (:hx/labels h)) (assoc :labels (:hx/labels h))))
+
+(defn- hyperedges-by-endpoint
+  [db endpoint-id]
+  (when (seq (str endpoint-id))
+    (->> (xtdb/q db '{:find [(pull e [*])]
+                      :in [eid]
+                      :where [[e :hx/endpoints eid]]}
+                 endpoint-id)
+         (map first)
+         (sort-by #(str (:hx/id %)))
+         (vec))))
+
+(defn- inferred-endpoint-entity
+  [endpoint-id]
+  (let [s (str endpoint-id)]
+    (cond
+      (str/starts-with? s "dir:")
+      nil
+
+      (str/includes? s "-d/file/")
+      {:id s :name s :type :file}
+
+      (str/includes? s "-d/mission/")
+      {:id s :name s :type :mission/doc}
+
+      :else
+      nil)))
+
+(defn- endpoint-entity
+  [node endpoint-id]
+  (or (some-> (fetch-entity node endpoint-id)
+              normalize-entity)
+      (inferred-endpoint-entity endpoint-id)))
+
+(defn- hyperedge-links-for-ego
+  [node src-doc fallback-name]
+  (let [db (xtdb/db node)
+        src-id (or (:xt/id src-doc) (:entity/id src-doc))
+        src-name (or (:entity/name src-doc) fallback-name)
+        focus-ids (set (remove nil? [(some-> src-id str)
+                                     (some-> src-name str)
+                                     (some-> fallback-name str)]))
+        query-ids (distinct (remove nil? [src-name src-id fallback-name]))
+        hyperedges (->> query-ids
+                        (mapcat #(hyperedges-by-endpoint db %))
+                        (distinct)
+                        (sort-by #(str (:hx/id %))))
+        focus-endpoint? #(contains? focus-ids (str %))]
+    (->> hyperedges
+         (mapcat (fn [h]
+                   (for [end-id (hyperedge-endpoint-ids h)
+                         :when (not (focus-endpoint? end-id))
+                         :let [end-entity (endpoint-entity node end-id)]
+                         :when end-entity]
+                     {:relation (normalize-hyperedge-relation h)
+                      :entity end-entity})))
+         (vec))))
+
 (defn ego
   "Return a Futon1-style ego view with outgoing and incoming links."
   [node name]
@@ -181,11 +251,12 @@
                               (let [src (relation-src-id r)]
                                 (when (and src (not= src src-id))
                                   (when-let [src-doc (xtdb/entity db src)]
-                                    {:relation (normalize-relation r)
+                                     {:relation (normalize-relation r)
                                      :entity (normalize-entity src-doc)})))))
-                      (vec))]
+                      (vec))
+        hx-outgoing (hyperedge-links-for-ego node src-doc name)]
     {:entity (normalize-entity src-doc)
-     :outgoing outgoing
+     :outgoing (vec (concat outgoing hx-outgoing))
      :incoming incoming}))
 
 (defn patterns-registry
