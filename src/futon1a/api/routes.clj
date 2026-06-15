@@ -1027,6 +1027,15 @@
         {:status 404
          :body {:error "not found" :hx/id id}}))))
 
+(def ^:private hyperedge-query-timeout-ms
+  "Hard cap (ms) on the hyperedge scan queries below. `:hx/type` / `:hx/endpoints`
+   are full attribute scans with `(pull e [*])` + in-memory sort, so on a large
+   store an unbounded `:limit` (applied post-scan) can run for minutes and, when
+   launched on a future that can't be interrupted mid-RocksDB-iteration, burn a
+   core indefinitely. A query `:timeout` makes XTDB abort and the caller degrade
+   (error response) instead of wedging. Tune via this constant."
+  15000)
+
 (defn hyperedges-by-type
   "GET /api/alpha/hyperedges?type=... — query hyperedges by :hx/type."
   [{:keys [node hx-type limit repo source-file]}]
@@ -1039,9 +1048,10 @@
                           (or (nil? expected)
                               (= expected (get-in h [:hx/props k]))
                               (= expected (get-in h [:hx/props (name k)]))))
-          results (->> (xtdb/q db '{:find [(pull e [*])]
-                                    :in [t]
-                                    :where [[e :hx/type t]]}
+          results (->> (xtdb/q db (assoc '{:find [(pull e [*])]
+                                           :in [t]
+                                           :where [[e :hx/type t]]}
+                                         :timeout hyperedge-query-timeout-ms)
                                type-kw)
                        (map first)
                        (map #(dissoc % :xt/id))
@@ -1095,9 +1105,10 @@
           resolved-id (resolve-end-id db end-id)
           ;; Query :hx/endpoints (flat string vector) for the (possibly
           ;; resolved) endpoint id.
-          results (->> (xtdb/q db '{:find [(pull e [*])]
-                                    :in [eid]
-                                    :where [[e :hx/endpoints eid]]}
+          results (->> (xtdb/q db (assoc '{:find [(pull e [*])]
+                                           :in [eid]
+                                           :where [[e :hx/endpoints eid]]}
+                                         :timeout hyperedge-query-timeout-ms)
                                resolved-id)
                        (map first)
                        (map #(dissoc % :xt/id))
