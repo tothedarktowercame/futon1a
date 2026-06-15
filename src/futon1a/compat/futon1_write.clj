@@ -57,7 +57,21 @@
          chosen (->> (or (not-empty candidates) docs)
                      (sort-by (fn [d] (str (:entity/id d))))
                      first)]
-     chosen)))
+	     chosen)))
+
+(defn- entity-by-id
+  "Return a canonical entity doc matching :entity/id."
+  [node id]
+  (let [db (xtdb/db node)
+        docs (->> (xtdb/q db '{:find [(pull e [:entity/id :entity/name :entity/type :entity/external-id :entity/source])]
+                                :in [id]
+                                :where [[e :entity/id id]]}
+                             id)
+                  (map first)
+                  (vec))]
+    (->> docs
+         (sort-by (fn [d] (str (:entity/id d))))
+         first)))
 
 (defn ensure-entity-doc
   "Build an idempotent Futon1-style entity doc from a request payload.
@@ -96,10 +110,11 @@
 (defn- relation-endpoint-id
   [node v]
   (cond
-    (string? v) (let [s (normalize-text v)]
-                  (when s
-                    (or (some-> (entity-by-name node s) :entity/id str)
-                        (when (uuid-string? s) s))))
+	    (string? v) (let [s (normalize-text v)]
+	                  (when s
+	                    (or (some-> (entity-by-name node s) :entity/id str)
+	                        (some-> (entity-by-id node s) :entity/id str)
+	                        (when (uuid-string? s) s))))
     (map? v) (or (normalize-text (:id v))
                  (normalize-text (:entity/id v))
                  (when-let [n (normalize-text (:name v))]

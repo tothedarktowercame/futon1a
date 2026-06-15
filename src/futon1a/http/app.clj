@@ -183,7 +183,7 @@
 
 (defn- futon1-compat-write!
   "Write doc into XTDB via futon1a pipeline (keeps L3 auth + L0 durability)."
-  [{:keys [store allowed-penholders] :as system} req penholder doc-id doc]
+  [{:keys [store allowed-penholders]} req penholder doc-id doc]
   (let [resp (routes/write {:store store
                             :penholder penholder
                             :allowed-penholders (or allowed-penholders #{})
@@ -232,7 +232,8 @@
         (and (= request-method :get) (= uri "/healthz"))
         (let [resp (routes/health {:checks {:xtdb (fn []
                                                    (try
-                                                     (do (xtdb/status node) {:ok? true})
+                                                     (xtdb/status node)
+                                                     {:ok? true}
                                                      (catch Exception e
                                                        {:ok? false :error (.getMessage e)})))}})]
           (response req (:status resp) (:body resp)))
@@ -610,9 +611,14 @@
 
         (and (= request-method :get) alpha-uri (str/starts-with? alpha-uri "/ego/"))
         (let [name (some-> (ego-name-from-uri alpha-uri) url-decode)
+              fold? (contains? #{"1" "true" "yes"}
+                               (str/lower-case (or (get query-params "fold") "")))
+              depth (some-> (get query-params "depth") Long/parseLong)
               resp (routes/compat-ego {:node node
                                       :profile (get-in req [:headers "x-profile"])
-                                      :name name})]
+                                      :name name
+                                      :fold? fold?
+                                      :depth depth})]
           (response req (:status resp) (:body resp)))
 
         (and (= request-method :get) alpha-uri (= alpha-uri "/meta/model"))

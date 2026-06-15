@@ -318,13 +318,16 @@
 
 (defn compat-ego
   "Futon1 API compatibility: GET /ego/:name."
-  [{:keys [node name profile]}]
+  [{:keys [node name profile fold? depth]}]
   (with-error-handling
     (require-keys! {:node node :name name} #{:node :name})
-    (ok {:command "/ego"
-         :name name
-         :profile (or profile "default")
-         :ego (f1g/ego node name)})))
+    (let [ego (or (when fold?
+                    (f1g/folded-ego node name {:depth (or depth 1)}))
+                  (f1g/ego node name))]
+      (ok {:command "/ego"
+           :name name
+           :profile (or profile "default")
+           :ego ego}))))
 
 (defn compat-meta-model
   "Futon1 API compatibility: GET /meta/model (patterns descriptor)."
@@ -832,7 +835,7 @@
                                                         :got {:lyrics/id lyrics-id
                                                               :lyrics/type lyrics-type
                                                               :lyrics/source (boolean lyrics-src)
-                                                              :lyrics/media/sha256 lyrics-sha}})})))
+                                                              :lyrics/media.sha256 lyrics-sha}})})))
           lyrics-doc {:xt/id lyrics-id
                       :entity/id lyrics-id
                       :entity/type :arxana/media-lyrics
