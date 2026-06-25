@@ -1040,32 +1040,45 @@
   15000)
 
 (defn hyperedges-by-type
-  "GET /api/alpha/hyperedges?type=... — query hyperedges by :hx/type."
+  "GET /api/alpha/hyperedges?type=... — query hyperedges by :hx/type.
+
+   Fetches entity ids first (a cheap index lookup — no document
+   materialization), sorts the ids, then pulls ONLY the documents that
+   are actually returned. The previous implementation pulled `[*]` for
+   every matching entity and sorted the whole set before applying the
+   limit, which timed out on large types (e.g. code/v05/var has 115k+,
+   code/v05/edits 184k+ rows) — silently breaking both inventory counts
+   and commit-ingest's edit resolution. See M-populate-substrate-2 D2.
+
+   `:count` is the TRUE total when no repo/source-file filter is given
+   (counted from ids without pulling); with a filter it is the count of
+   the returned (pulled, post-filtered) docs."
   [{:keys [node hx-type limit repo source-file]}]
   (with-error-handling
     (let [db (xtdb/db node)
           type-kw (when hx-type (normalize-type hx-type))
           _ (when-not type-kw
               (throw (ex-info "type parameter required" {:type hx-type})))
+          filtered? (or repo source-file)
           prop-matches? (fn [h k expected]
                           (or (nil? expected)
                               (= expected (get-in h [:hx/props k]))
                               (= expected (get-in h [:hx/props (name k)]))))
-          results (->> (xtdb/q db (assoc '{:find [(pull e [*])]
-                                           :in [t]
-                                           :where [[e :hx/type t]]}
-                                         :timeout hyperedge-query-timeout-ms)
-                               type-kw)
-                       (map first)
-                       (map #(dissoc % :xt/id))
-                       (filter #(prop-matches? % :repo repo))
-                       (filter #(prop-matches? % :source-file source-file))
-                       (sort-by #(str (:hx/id %)))
-                       vec)
-          results (if (and limit (pos? limit))
-                    (vec (take limit results))
-                    results)]
-      (ok {:hyperedges results :count (count results)}))))
+          ;; ids only — index lookup, no per-doc pull, no full-set sort cost
+          eids (->> (xtdb/q db (assoc '{:find [e] :in [t] :where [[e :hx/type t]]}
+                                      :timeout hyperedge-query-timeout-ms)
+                             type-kw)
+                    (map first)
+                    (sort-by str))
+          total (count eids)
+          ;; pull lazily so a limited query only materializes what it keeps
+          docs (cond->> (map #(xtdb/entity db %) eids)
+                 repo        (filter #(prop-matches? % :repo repo))
+                 source-file (filter #(prop-matches? % :source-file source-file)))
+          docs (if (and limit (pos? limit)) (take limit docs) docs)
+          results (->> docs (map #(dissoc % :xt/id)) vec)]
+      (ok {:hyperedges results
+           :count (if filtered? (count results) total)}))))
 
 (def ^:private uuid-pattern
   "Canonical UUID format `8-4-4-4-12` hex string."
