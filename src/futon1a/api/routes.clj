@@ -1031,6 +1031,15 @@
    element. A past valid-time remains visible at current time, so the
    pipeline's `verify-materialized!` (current-db read) still passes.
 
+   Optional `:hx/op \"retract\"` ends the hyperedge's validity at
+   `:hx/valid-time` instead of putting — `[:xtdb.api/delete hx-id vt]` —
+   so `db-as-of(>vt)` no longer sees it (D3 slice 2 removal-accuracy). The
+   hx-id is computed from type+endpoints exactly as for the put, so a
+   retract targets exactly the entity an earlier put created. A delete-only
+   tx has no put-docs, so verify-materialized! passes; the counter-ratchet
+   guards only protected classes (entity/relation/descriptor/docbook), which
+   a code/* hyperedge is not, so deletes are unguarded.
+
    Writes via the full pipeline (L4→L0)."
   [{:keys [node store penholder allowed-penholders profile payload]}]
   (with-error-handling
@@ -1039,22 +1048,29 @@
     (let [{:keys [doc hyperedge]} (f1w/upsert-hyperedge-doc {:node node :payload payload})
           valid-time (coerce-valid-time (or (:hx/valid-time payload)
                                             (:valid-time payload)))
-          put-op (cond-> [:xtdb.api/put doc]
-                   valid-time (conj valid-time))
+          retract? (= "retract" (some-> (or (:hx/op payload) (:op payload))
+                                        name str/lower-case))
+          tx-op (if retract?
+                  (cond-> [:xtdb.api/delete (:xt/id doc)]
+                    valid-time (conj valid-time))
+                  (cond-> [:xtdb.api/put doc]
+                    valid-time (conj valid-time)))
           result (pipeline/run-write!
                   {:store store
                    :penholder penholder
                    :allowed-penholders allowed-penholders
                    :model {}
                    :identity nil
-                   :tx-ops [put-op]
+                   :tx-ops [tx-op]
                    :claim {:op :compat/futon1-hyperedge}
                    :detail (cond-> {:hx/type (:hx/type payload)}
-                             valid-time (assoc :hx/valid-time valid-time))})]
-      (ok {:profile (or profile "default")
-           :hyperedge hyperedge
-           :tx-id (:tx-id result)
-           :path/id (get-in result [:path :path/id])}))))
+                             valid-time (assoc :hx/valid-time valid-time)
+                             retract? (assoc :hx/op :retract))})]
+      (ok (cond-> {:profile (or profile "default")
+                   :hyperedge hyperedge
+                   :tx-id (:tx-id result)
+                   :path/id (get-in result [:path :path/id])}
+            retract? (assoc :retracted? true))))))
 
 (defn hyperedge-by-id
   "GET /api/alpha/hyperedge/:id — fetch a single hyperedge by its :hx/id."
