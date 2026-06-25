@@ -86,3 +86,25 @@
     (let [resp (routes/verify-repair {:prev 1 :next 1 :label :entities})]
       (is (= 200 (:status resp)))
       (is (= true (get-in resp [:body :ok?]))))))
+
+(deftest coerce-valid-time-cases
+  (testing "M-populate-substrate-2 D3: valid-time directive coercion"
+    (let [coerce #'routes/coerce-valid-time]
+      (testing "nil / blank / garbage degrade to nil (advisory directive)"
+        (is (nil? (coerce nil)))
+        (is (nil? (coerce "")))
+        (is (nil? (coerce "   ")))
+        (is (nil? (coerce "not-a-time")))
+        (is (nil? (coerce :keyword))))
+      (testing "epoch-millis number -> Date"
+        (let [d (coerce 1775001600000)]
+          (is (inst? d))
+          (is (= 1775001600000 (.getTime ^java.util.Date d)))))
+      (testing "numeric string -> Date (epoch-millis)"
+        (is (= 1775001600000 (.getTime ^java.util.Date (coerce "1775001600000")))))
+      (testing "ISO-8601 instant string -> Date"
+        (is (= (.getTime (java.util.Date/from (java.time.Instant/parse "2026-04-01T00:00:00Z")))
+               (.getTime ^java.util.Date (coerce "2026-04-01T00:00:00Z")))))
+      (testing "an existing inst passes through"
+        (let [d #inst "2026-04-01T00:00:00.000-00:00"]
+          (is (= d (coerce d))))))))

@@ -988,6 +988,31 @@
 
 ;; --- Hyperedge endpoints -----------------------------------------------------
 
+(defn- coerce-valid-time
+  "Coerce a payload `hx/valid-time` directive to a `java.util.Date` (the
+   valid-time START XTDB stamps onto the put op's 3rd element), or nil.
+
+   Accepts an epoch-millis number, a numeric string, or an ISO-8601
+   instant string. Used by M-populate-substrate-2 D3 to write code
+   structure at a commit's timestamp so `db-as-of(t)` time-travels it.
+
+   Returns nil for nil/blank/unparseable input — an unparseable
+   valid-time degrades to a current-time put rather than failing the
+   write (the directive is advisory; a malformed clock must not lose the
+   doc)."
+  [vt]
+  (cond
+    (nil? vt) nil
+    (inst? vt) vt
+    (number? vt) (java.util.Date. (long vt))
+    (string? vt) (let [s (str/trim vt)]
+                   (cond
+                     (str/blank? s) nil
+                     (re-matches #"\d+" s) (java.util.Date. (Long/parseLong s))
+                     :else (try (java.util.Date/from (java.time.Instant/parse s))
+                                (catch Exception _ nil))))
+    :else nil))
+
 (defn compat-upsert-hyperedge
   "Futon1 API parity: POST /hyperedge (under /api/alpha or /api).
 
@@ -999,21 +1024,33 @@
       :hx/endpoints [{:role :source :entity {:id \"eid-a\"}}
                       {:role :target :entity {:id \"eid-b\"}}]}
 
+   Optional `:hx/valid-time` (epoch-ms / ISO-8601) stamps the put at a
+   past valid-time so `db-as-of` recovers structure as of that instant
+   (M-populate-substrate-2 D3). The doc builder ignores the key, so it
+   never lands in the stored doc — it only drives the put op's 3rd
+   element. A past valid-time remains visible at current time, so the
+   pipeline's `verify-materialized!` (current-db read) still passes.
+
    Writes via the full pipeline (L4→L0)."
   [{:keys [node store penholder allowed-penholders profile payload]}]
   (with-error-handling
     (require-keys! {:node node :store store :penholder penholder :allowed-penholders allowed-penholders}
                    #{:node :store :penholder :allowed-penholders})
     (let [{:keys [doc hyperedge]} (f1w/upsert-hyperedge-doc {:node node :payload payload})
+          valid-time (coerce-valid-time (or (:hx/valid-time payload)
+                                            (:valid-time payload)))
+          put-op (cond-> [:xtdb.api/put doc]
+                   valid-time (conj valid-time))
           result (pipeline/run-write!
                   {:store store
                    :penholder penholder
                    :allowed-penholders allowed-penholders
                    :model {}
                    :identity nil
-                   :tx-ops [[:xtdb.api/put doc]]
+                   :tx-ops [put-op]
                    :claim {:op :compat/futon1-hyperedge}
-                   :detail {:hx/type (:hx/type payload)}})]
+                   :detail (cond-> {:hx/type (:hx/type payload)}
+                             valid-time (assoc :hx/valid-time valid-time))})]
       (ok {:profile (or profile "default")
            :hyperedge hyperedge
            :tx-id (:tx-id result)
