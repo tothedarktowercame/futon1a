@@ -7,7 +7,8 @@
    Invariant: I3 (Hierarchy — errors surface at the layer that caused them).
    Pattern:   storage/error-layer-hierarchy
    Theory:    futon-theory/error-hierarchy, futon-theory/stop-the-line"
-  (:require [futon1a.auth.penholder :as auth]
+  (:require [clojure.string :as str]
+            [futon1a.auth.penholder :as auth]
             [futon1a.core.entity :as ent]
             [futon1a.core.identity :as id]
             [futon1a.core.invariants :as inv]
@@ -142,6 +143,97 @@
      :tx-id tx-id
      :path/id (get-in path [:path/id])
      :path path}))
+
+;; ---------------------------------------------------------------------------
+;; Erasure — the GDPR right-to-erasure path (first-class, gated, audited).
+;; ---------------------------------------------------------------------------
+
+(def erase-allowed-penholders
+  "Erasure is destructive (XTDB evict removes a doc AND its whole bitemporal
+   history). Gated to the operator only (Joe, 2026-06-26) — there is no API
+   surface; it runs via the CLI as penholder \"joe\"."
+  #{"joe"})
+
+(defn- sha256-hex [s]
+  (let [md (java.security.MessageDigest/getInstance "SHA-256")]
+    (apply str (map #(format "%02x" %) (.digest md (.getBytes (str s) "UTF-8"))))))
+
+(defn run-erase!
+  "GDPR right-to-erasure: hard-delete docs by `:eids` via XTDB **evict** — which
+   removes each doc AND its entire bitemporal history (unlike `:delete`, which
+   only tombstones, leaving the data recoverable via `db-as-of`). This is the
+   one sanctioned destructive path; it rides the durable pipeline rather than a
+   raw evict:
+
+     L4 validate (non-empty eids + a reason) → L3 authorize (penholder must be
+     in `erase-allowed-penholders` = #{\"joe\"}) → L0 durable evict, with the
+     counter-ratchet permitting the deliberate drop (`:allow-drop-classes`).
+
+   Emits a **non-revealing compliance audit record** — an `:erasure-event`
+   entity carrying actor · reason · count · SHA-256 of the sorted eids · time
+   (NOT the erased content, so the receipt itself isn't a re-leak). The audit
+   put is materialization-verified by L0; the evicts are not (they remove).
+
+   Inputs (map): `:store` `:penholder` `:eids` (vector of xt/id) `:reason`
+   (string) `:detail` (optional). Returns
+   `{:ok? true :erased N :audit-id <id> :tx-id <id>}` or throws.
+
+   NOTE (named follow-ons): for LIVE data, eviction alone doesn't hold — the
+   watcher / ingest would re-derive it; a re-ingestion suppression list is the
+   GDPR-subject generalisation. For the empty noise type-docs this excursion
+   targets, no live source carries them, so eviction sticks."
+  [{:keys [store penholder eids reason detail]}]
+  ;; L4 — validation
+  (when-not (and (vector? eids) (seq eids))
+    (throw (ex-info "erase requires a non-empty :eids vector"
+                    {:error (mv/layer4-error :erase-missing-eids {:eids eids})})))
+  (when-not (and (string? reason) (seq (str/trim reason)))
+    (throw (ex-info "erase requires a :reason (for the GDPR audit record)"
+                    {:error (mv/layer4-error :erase-missing-reason {})})))
+  ;; L3 — authorization (erasure is operator-only)
+  (auth/authorize! {:penholder penholder :allowed-penholders erase-allowed-penholders})
+  (let [eids      (vec (distinct (map str eids)))
+        audit-id  (str "erasure-event/" (java.util.UUID/randomUUID))
+        audit     {:xt/id audit-id
+                   :entity/id audit-id
+                   :entity/type :erasure-event
+                   :name (str "erasure of " (count eids) " doc(s)")
+                   :erasure/event? true
+                   :erasure/by penholder
+                   :erasure/reason reason
+                   :erasure/eid-count (count eids)
+                   :erasure/eid-sha256 (sha256-hex (pr-str (sort eids)))
+                   :erasure/at (str (java.time.Instant/now))}
+        type-ops  (types/tx-ops-for-docs [audit])
+        evict-ops (mapv (fn [eid] [:xtdb.api/evict eid]) eids)
+        tx-ops    (-> (vec type-ops) (conj [:xtdb.api/put audit]) (into evict-ops))
+        _ (inv/enforce-counter-ratchet!
+           {:store store :tx-ops tx-ops
+            ;; erasure is a deliberate drop — permit every protected class
+            :allow-drop-classes #{:entity :relation :descriptor :docbook}})
+        {:keys [tx-id]} (xt/durable-write-tx!
+                         {:store store :actor penholder
+                          :claim {:op :erase :count (count eids)}
+                          :detail (or detail {:layer :erase :reason reason})
+                          :tx-ops tx-ops
+                          :proof-log-path (resolve-proof-log-path store nil)})]
+    {:ok? true :erased (count eids) :audit-id audit-id :tx-id tx-id}))
+
+(defn retract-type!
+  "Erase a type-doc from the registry — every kind/encoding variant currently
+   present (via `types/type-xt-ids-present`). Sugar over `run-erase!` (so it is
+   joe-gated + audited). For the empty noise docs this sticks: no live domain
+   doc carries the type, so the derive-from-data registry won't recreate it.
+
+   Inputs: `:store` `:node` `:type-id` `:penholder` `:reason` (optional).
+   Returns `run-erase!`'s result, or `{:ok? true :erased 0}` if no variant
+   is present."
+  [{:keys [store node type-id penholder reason]}]
+  (let [eids (types/type-xt-ids-present node type-id)]
+    (if (seq eids)
+      (run-erase! {:store store :penholder penholder :eids eids
+                   :reason (or reason (str "retract-type " type-id))})
+      {:ok? true :erased 0 :note "no variants present"})))
 
 (defn run-open-world!
   "Run an open-world ingest through L4 → L3 → L2 → L0.

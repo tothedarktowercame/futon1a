@@ -99,6 +99,24 @@
                           :aliases (vec (distinct (concat (:type/aliases existing) aliases)))})]
     [:xtdb.api/put merged]))
 
+(defn type-xt-ids-present
+  "All xt/ids under which `type-id` is CURRENTLY registered — across kinds
+   (entity/relation/intent) and both historical encodings (colon `:ns/name`
+   and the no-colon relic `ns/name`). Used by erasure (`pipeline/retract-type!`)
+   so retraction removes every variant of a noise type-doc, not just the
+   canonical one. Read-only; returns only the xt/ids that actually exist."
+  [node type-id]
+  (let [db  (xtdb/db node)
+        tid (normalize-type-id type-id)
+        nm  (when tid (let [s (str tid)] (if (str/starts-with? s ":") (subs s 1) s)))]
+    (when nm
+      (->> (for [kind ["entity" "relation" "intent"]
+                 enc  [(str ":" nm) nm]]
+             (str "type|" kind "|" enc))
+           distinct
+           (filter #(some? (xtdb/entity db %)))
+           vec))))
+
 (defn set-parent-tx
   "Return a tx-op to set a type's parent (override inference)."
   [{:keys [node kind type-id parent]}]

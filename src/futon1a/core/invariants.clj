@@ -58,6 +58,12 @@
       (= tag :xtdb.api/delete)
       (second op)
 
+      ;; evict = GDPR hard-delete (removes the doc + its whole history). Like
+      ;; delete it drops a doc, so the ratchet must see it (else erasure would
+      ;; silently bypass the count guard).
+      (= tag :xtdb.api/evict)
+      (second op)
+
       :else nil)))
 
 (defn- doc->classes
@@ -91,6 +97,14 @@
           state))
 
       (= tag :xtdb.api/delete)
+      (let [id (second op)]
+        (if id
+          (assoc state id nil)
+          state))
+
+      ;; evict drops the doc (and its history) — treat like delete for the
+      ;; before/after count simulation.
+      (= tag :xtdb.api/evict)
       (let [id (second op)]
         (if id
           (assoc state id nil)

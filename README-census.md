@@ -13,6 +13,7 @@ The visual map of *what kinds of things* it holds is
 
 ## TL;DR
 
+- **The honest denominator** (real declared types, % populated, globs/dups, off-catalog) → `bb futon3c/scripts/catalog_census.bb` — the reproducible count-pushdown census. The registry is an append-only `run-write!` byproduct that **drifts** (208→216 docs in hours on 2026-06-26), so **re-derive; never cite a frozen number.** As of 2026-06-26: 216 docs → 196 distinct → **186 real declared types** (10 `*`-globs dropped); **101 populated (≈54%)**, 85 empty; ~130 store-side incl. off-catalog.
 - **What KINDS** → `GET /api/alpha/types` (the declared type catalog; ~200 kinds).
 - **HOW MANY of one kind** → `GET /api/alpha/census?type=<hx-type>` (or
   `?entity-type=<t>`). This is the count endpoint. **Use it for populations.**
@@ -101,9 +102,11 @@ The node is `(:node @futon3c.dev/!f1-sys)`; alias `xtdb.api` (already loaded).
    (`ns/var`, `256ca/var`, label `…-d`/`phase-1`); the live watcher + D3 replay
    write **repo-label-prefixed** (`futon3c-d/ns/var`). For time-travel query the
    *prefixed* population. substrate-2 is a palimpsest of several ingest campaigns
-   under different labels — the type catalog (declared, ~203) ≠ the populated
-   types (~130: 99 entity-types + ~30 hyperedge-types; an earlier "~35" was a
-   timeout-sniff undercount — footgun #1).
+   under different labels — the declared type catalog (216 docs → 196 distinct →
+   **186 real** after dropping 10 globs; re-derive with `catalog_census.bb`) ≠
+   the populated types (~130 store-side incl. **off-catalog** heavies like
+   `code/v05/edits` 185k / `code/v05/var` 125k; of the 186 declared, **101 are
+   populated ≈54%**; an earlier "~35" was a timeout-sniff undercount — footgun #1).
 5. **Merges aren't ingested.** commit-ingest skips merge commits, so a merge
    HEAD is never in the store. To ask "is this repo current?", check the
    **last non-merge** sha: `git -C <repo> rev-list --no-merges -1 HEAD`.
