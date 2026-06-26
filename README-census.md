@@ -101,8 +101,9 @@ The node is `(:node @futon3c.dev/!f1-sys)`; alias `xtdb.api` (already loaded).
    (`ns/var`, `256ca/var`, label `…-d`/`phase-1`); the live watcher + D3 replay
    write **repo-label-prefixed** (`futon3c-d/ns/var`). For time-travel query the
    *prefixed* population. substrate-2 is a palimpsest of several ingest campaigns
-   under different labels — the type catalog (declared, ~200) ≠ the populated
-   types (~35).
+   under different labels — the type catalog (declared, ~203) ≠ the populated
+   types (~130: 99 entity-types + ~30 hyperedge-types; an earlier "~35" was a
+   timeout-sniff undercount — footgun #1).
 5. **Merges aren't ingested.** commit-ingest skips merge commits, so a merge
    HEAD is never in the store. To ask "is this repo current?", check the
    **last non-merge** sha: `git -C <repo> rev-list --no-merges -1 HEAD`.
