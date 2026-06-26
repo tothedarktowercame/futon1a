@@ -144,6 +144,38 @@
     (require-keys! {:node node} #{:node})
     (ok {:types (types/list-types node)})))
 
+(defn- type-population
+  "Count-pushdown for ONE type: `[e <attr> <type>]` with the type BOUND, so it's
+   an indexed count (no document materialisation), fast even at 100k+ rows.
+   `attr` is :hx/type or :entity/type; `type-kw` the type keyword."
+  [db attr type-kw]
+  (or (ffirst (xtdb/q db {:find ['(count e)] :in ['t] :where [['e attr 't]]} type-kw)) 0))
+
+(defn census
+  "GET /api/alpha/census?type=<hx-type>     -> {:type :kind :count} (one hyperedge type)
+   GET /api/alpha/census?entity-type=<type> -> {:type :kind :count} (one entity type)
+
+   The real per-type POPULATION the type catalog (/types) + curated exemplars
+   don't give — via a BOUND-type count-pushdown (indexed, fast, no document
+   materialisation; safe on the live node). Per-type by design: a full all-types
+   census is a ~470k-doc scan that times out as one call, so the bookkeeping page
+   walks /types and fetches a /census count per kind. M-populate-substrate-2 D7b /
+   the census blocker."
+  [{:keys [node hx-type entity-type]}]
+  (with-error-handling
+    (require-keys! {:node node} #{:node})
+    (let [db (xtdb/db node)]
+      (cond
+        hx-type
+        (ok {:type hx-type :kind :hyperedge
+             :count (type-population db :hx/type (keyword hx-type))})
+        entity-type
+        (ok {:type entity-type :kind :entity
+             :count (type-population db :entity/type (keyword entity-type))})
+        :else
+        {:status 400
+         :body {:error "census requires ?type=<hx-type> or ?entity-type=<type>"}}))))
+
 (defn types-parent
   "Override a type's parent.
 

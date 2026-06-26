@@ -402,6 +402,14 @@
                             :body {:error "type or end parameter required"}})]
           (response req (:status resp) (:body resp)))
 
+        ;; Census — real per-type populations (counts), the raw census the type
+        ;; catalog doesn't give (M-populate-substrate-2 D7b).
+        (and (= request-method :get) (= uri "/api/alpha/census"))
+        (let [resp (routes/census {:node node
+                                   :hx-type (get query-params "type")
+                                   :entity-type (get query-params "entity-type")})]
+          (response req (:status resp) (:body resp)))
+
         ;; Futon4 snapshot surface (filesystem export + pipeline restore).
         (and (= request-method :post) alpha-uri (= alpha-uri "/snapshot"))
         (let [payload body-map
