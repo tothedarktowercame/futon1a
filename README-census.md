@@ -59,7 +59,7 @@ For counts the API doesn't pre-bake, time-travel, or ad-hoc datalog. **Read-only
 unless you mean it; never restart the JVM** — reload code with `load-file`.
 
 ```bash
-EVAL(){ curl -s -H "x-admin-token: $(cat /home/joe/code/futon1a/.admintoken)" \
+EVAL(){ curl -s -H "x-admin-token: $(cat /home/joe/code/futon3c/.admintoken)" \
   -H "Content-Type: text/plain" --data-binary @- "http://127.0.0.1:6768/eval"; }
 ```
 
@@ -115,7 +115,7 @@ The node is `(:node @futon3c.dev/!f1-sys)`; alias `xtdb.api` (already loaded).
    probe family + the watcher's `freshness/check+notify!` (D7a). If counts look
    stale, run the probe before assuming the data is right.
 8. **Never restart the serving JVM** (it hosts 7071/7070/6768/3100). Reload via
-   Drawbridge `load-file`. See `README-drawbridge.md`.
+   Drawbridge `load-file`. See `futon3c/README-drawbridge.md`.
 
 ## 4. Freshness / liveness check
 
@@ -132,5 +132,5 @@ has fallen behind that repo's git HEAD.
   what-it-should-be), with per-box mission-deliverable tags.
 - `futon3c/holes/missions/M-populate-substrate-2.md` — the mission + checkpoint log
   (D0 liveness, the reader fix, D2.1 edits, D3 bitemporal, D7a freshness alarm, D0.2).
-- `README-drawbridge.md` — the Drawbridge reload/eval surface.
+- `futon3c/README-drawbridge.md` — the Drawbridge reload/eval surface (the `.admintoken` lives in futon3c too).
 - `README-conventions.md` — id/endpoint conventions.
