@@ -24,9 +24,14 @@
    "futon4-d" "futon4-elisp-d" "futon5-d" "futon5a-d" "futon6-d" "futon6-py-d"
    "futon7-d"])
 
+;; Suffix is mixed-case (18 of the 739 real :mission/doc nodes are mixed-case:
+;; IRC-stability, P3-rational-reconstruction, E-mission-head, G-over-cascades),
+;; but the M- prefix is forbidden — it's absent from every canonical node today,
+;; so (?!M-) catches divergent twins (…/mission/M-First-Flights) without rejecting
+;; anything real. Full-population verified by the model owner (claude-2).
 (def mission-doc-id-pattern
   (str "^(" (str/join "|" mission-doc-repo-allow-list)
-       ")/mission/[A-Za-z0-9-]+$"))
+       ")/mission/(?!M-)[A-Za-z0-9-]+$"))
 
 ;; Known aliases → QUEUE (migration worklist), not reject: bare M-* is a live
 ;; writer (capability-ingest) and the mine's mission|M-* — canonicalizing both
@@ -35,10 +40,13 @@
   ["^M-[^/]+$" "^mission[|]"])
 
 (def mission-doc-descriptor
-  "The :mission/doc model the L4 write-gate reads. :id-pattern / :queue /
-   :repo-allow-list are the new id-contract fields the gate honours."
+  "The :mission/doc model the L4 write-gate reads. The canonical identifier lives
+   in :entity/name (the watcher's :xt/id is a UUID until the :id==:name root-fix
+   lands), so the gate checks :id-field. :id-pattern / :queue / :repo-allow-list
+   are the id-contract fields the gate honours."
   {:required [:entity/name :entity/external-id]
    :id-strategy :name
+   :id-field :entity/name
    :id-pattern mission-doc-id-pattern
    :queue mission-doc-queue-patterns
    :repo-allow-list mission-doc-repo-allow-list})
@@ -162,6 +170,7 @@
                               :type/id type-id
                               :required (:required defn)
                               :id-strategy (:id-strategy defn)}
+                       (:id-field defn) (assoc :id-field (:id-field defn))
                        (:id-pattern defn) (assoc :id-pattern (:id-pattern defn))
                        (:queue defn) (assoc :queue (:queue defn))
                        (:repo-allow-list defn) (assoc :repo-allow-list (:repo-allow-list defn)))

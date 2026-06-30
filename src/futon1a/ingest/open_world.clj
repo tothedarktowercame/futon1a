@@ -31,37 +31,43 @@
         descriptor (registry/get-model model-id)]
     (cond
       descriptor
-      (case (classify-id (:entity/id entity) descriptor)
-        :reject
-        (do
-          (gate-queue/record! {:entity-id (:entity/id entity)
-                               :entity-type model-id
-                               :disposition :rejected
-                               :reason :non-canonical-id
-                               :expected (:id-pattern descriptor)})
-          (throw (ex-info "non-canonical entity id"
-                          {:error (mv/layer4-error
-                                   :non-canonical-id
-                                   {:entity/id (:entity/id entity)
-                                    :entity/type model-id
-                                    :expected (:id-pattern descriptor)})})))
+      ;; The canonical identifier may live in a field other than :entity/id
+      ;; (missions carry it in :entity/name; the watcher's :xt/id is a UUID until
+      ;; the :id==:name root-fix). The descriptor names that field via :id-field.
+      (let [id-field (get descriptor :id-field :entity/id)
+            id-val (get entity id-field)]
+        (case (classify-id id-val descriptor)
+          :reject
+          (do
+            (gate-queue/record! {:entity-id id-val
+                                 :entity-type model-id
+                                 :disposition :rejected
+                                 :reason :non-canonical-id
+                                 :expected (:id-pattern descriptor)})
+            (throw (ex-info "non-canonical entity id"
+                            {:error (mv/layer4-error
+                                     :non-canonical-id
+                                     {:entity/id id-val
+                                      :id-field id-field
+                                      :entity/type model-id
+                                      :expected (:id-pattern descriptor)})})))
 
-        ;; A known alias: record it on the migration worklist but let it through
-        ;; so the live writer isn't broken. L0-diversion is the follow-on.
-        :queue
-        (do
-          (gate-queue/record! {:entity-id (:entity/id entity)
-                               :entity-type model-id
-                               :disposition :queued
-                               :reason :alias-pending-migration
-                               :expected (:id-pattern descriptor)})
-          (merge (mv/validate-model! {:model entity
-                                      :required-keys (:required descriptor)})
-                 {:queued? true}))
+          ;; A known alias: record it on the migration worklist but let it through
+          ;; so the live writer isn't broken. L0-diversion is the follow-on.
+          :queue
+          (do
+            (gate-queue/record! {:entity-id id-val
+                                 :entity-type model-id
+                                 :disposition :queued
+                                 :reason :alias-pending-migration
+                                 :expected (:id-pattern descriptor)})
+            (merge (mv/validate-model! {:model entity
+                                        :required-keys (:required descriptor)})
+                   {:queued? true}))
 
-        :accept
-        (mv/validate-model! {:model entity
-                             :required-keys (:required descriptor)}))
+          :accept
+          (mv/validate-model! {:model entity
+                               :required-keys (:required descriptor)})))
 
       require-model?
       (throw (ex-info "model descriptor missing"
