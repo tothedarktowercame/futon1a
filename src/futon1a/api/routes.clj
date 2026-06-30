@@ -13,6 +13,7 @@
             [futon1a.core.identity :as id]
             [futon1a.core.invariants :as inv]
             [futon1a.model.descriptor-store :as dstore]
+            [futon1a.model.gate-queue :as gate-queue]
             [futon1a.model.registry :as registry]
             [futon1a.model.type-registry :as types]
             [futon1a.model.validation :as mv]
@@ -97,6 +98,13 @@
   "List all registered model ids."
   []
   (ok {:models (vec (registry/list-models))}))
+
+(defn model-queue
+  "GET /meta/model/queue — the L4 write-gate's record of non-canonical writes
+   (rejected + queued), so scheme drift is a *visible* gate failure rather than a
+   weeks-later discovery (E-futon1a-archivist)."
+  []
+  (ok {:queue (gate-queue/snapshot)}))
 
 (defn meta-model
   "Fetch a model descriptor by scope from XTDB.

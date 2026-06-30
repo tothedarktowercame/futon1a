@@ -676,6 +676,12 @@
         (let [resp (routes/meta-models {:node node})]
           (response req (:status resp) (:body resp)))
 
+        ;; Must precede the generic /meta/model/<scope> prefix below, which would
+        ;; otherwise read "queue" as a scope (E-futon1a-archivist write-gate log).
+        (and (= request-method :get) (= uri "/meta/model/queue"))
+        (let [resp (routes/model-queue)]
+          (response req (:status resp) (:body resp)))
+
         (and (= request-method :get) (str/starts-with? uri "/meta/model/"))
         (let [scope (subs uri (count "/meta/model/"))
               ;; Handle /meta/model/<scope>/verify.

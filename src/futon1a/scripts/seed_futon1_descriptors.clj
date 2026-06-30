@@ -8,8 +8,49 @@
    - :model/has-entity-type and :model/has-invariant relations
 
    The seed is intentionally small but uses the full descriptor shape (2.11.1)."
-  (:require [futon1a.core.pipeline :as pipeline]
+  (:require [clojure.string :as str]
+            [futon1a.core.pipeline :as pipeline]
+            [futon1a.model.registry :as registry]
             [xtdb.api :as xtdb]))
+
+;; --- Canonical mission identity contract (E-futon1a-archivist) ----------------
+;; Owner: claude-2 (data model). Grounded in the 708 canonical :mission/doc nodes:
+;; <repo> is an ALLOW-LIST of the 13 real repos (a wildcard regex would wave
+;; through drift labels like futon3c-desktop-save-d); <id> = [A-Za-z0-9-]+
+;; (mixed-case is canonical; a '.' is out-of-charset drift).
+
+(def mission-doc-repo-allow-list
+  ["futon0-d" "futon2-d" "futon3-d" "futon3a-d" "futon3b-d" "futon3c-d"
+   "futon4-d" "futon4-elisp-d" "futon5-d" "futon5a-d" "futon6-d" "futon6-py-d"
+   "futon7-d"])
+
+(def mission-doc-id-pattern
+  (str "^(" (str/join "|" mission-doc-repo-allow-list)
+       ")/mission/[A-Za-z0-9-]+$"))
+
+;; Known aliases → QUEUE (migration worklist), not reject: bare M-* is a live
+;; writer (capability-ingest) and the mine's mission|M-* — canonicalizing both
+;; needs a repo the gate can't infer, so an owner resolves them later.
+(def mission-doc-queue-patterns
+  ["^M-[^/]+$" "^mission[|]"])
+
+(def mission-doc-descriptor
+  "The :mission/doc model the L4 write-gate reads. :id-pattern / :queue /
+   :repo-allow-list are the new id-contract fields the gate honours."
+  {:required [:entity/name :entity/external-id]
+   :id-strategy :name
+   :id-pattern mission-doc-id-pattern
+   :queue mission-doc-queue-patterns
+   :repo-allow-list mission-doc-repo-allow-list})
+
+(defn register-mission-contract!
+  "Load the :mission/doc canonical-id contract into the in-memory model registry
+   so the L4 write-gate enforces it. Idempotent. Call once after (Drawbridge)
+   reload to activate the gate on a running server."
+  []
+  (registry/register-model! {:id :mission/doc
+                             :descriptor mission-doc-descriptor
+                             :override? true}))
 
 (defn- descriptor
   [{:keys [scope version penholder issued-at entities invariants]}]
@@ -82,7 +123,13 @@
                 :issued-at 0
                 :entities {:model/penholder {:required [:penholder/id :penholder/allowed?]
                                              :id-strategy :custom}}
-                :invariants [:penholder/entry-required]})])
+                :invariants [:penholder/entry-required]})
+   (descriptor {:scope :mission
+                :version "0.1.0"
+                :penholder "claude-2"
+                :issued-at 0
+                :entities {:mission/doc mission-doc-descriptor}
+                :invariants [:mission/canonical-id]})])
 
 (defn- kw->id [k] (str k))
 
@@ -108,13 +155,16 @@
         (conj! tx-ops [::xtdb/put ddoc])
         (doseq [[type-id defn] (:entities d)]
           (let [eid (entity-type-eid scope type-id)
-                edoc {:xt/id eid
-                      :entity/id eid
-                      :entity/type :model/entity-type
-                      :model/scope scope
-                      :type/id type-id
-                      :required (:required defn)
-                      :id-strategy (:id-strategy defn)}
+                edoc (cond-> {:xt/id eid
+                              :entity/id eid
+                              :entity/type :model/entity-type
+                              :model/scope scope
+                              :type/id type-id
+                              :required (:required defn)
+                              :id-strategy (:id-strategy defn)}
+                       (:id-pattern defn) (assoc :id-pattern (:id-pattern defn))
+                       (:queue defn) (assoc :queue (:queue defn))
+                       (:repo-allow-list defn) (assoc :repo-allow-list (:repo-allow-list defn)))
                 rid (rel-id deid :model/has-entity-type eid)
                 rdoc {:xt/id rid
                       :relation/id rid
