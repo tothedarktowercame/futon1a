@@ -1,5 +1,7 @@
 (ns futon1a.system-test
   (:require [clojure.test :refer [deftest is testing]]
+            [futon1a.model.registry :as registry]
+            [futon1a.scripts.seed-futon1-descriptors :as seed]
             [futon1a.system :as sys])
   (:import (java.nio.file Files)))
 
@@ -15,6 +17,22 @@
   {:tx-log (-> config :xtdb/tx-log :kv-store :db-dir str)
    :document-store (-> config :xtdb/document-store :kv-store :db-dir str)
    :index-store (-> config :xtdb/index-store :kv-store :db-dir str)})
+
+(deftest start-registers-mission-id-gate
+  (testing "boot registers the canonical :mission/doc id-contract — the L4 write-gate
+            is active from start and survives a restart (E-futon1a-archivist durability)"
+    (registry/clear-registry!)
+    (is (nil? (registry/get-model :mission/doc)) "precondition: registry empty")
+    (let [dir (temp-dir)
+          s (sys/start! {:data-dir dir
+                         :port 0
+                         :allowed-penholders #{"tester"}})]
+      (try
+        (let [d (registry/get-model :mission/doc)]
+          (is (some? d) "start! must register the :mission/doc contract so the gate is live from boot")
+          (is (= seed/mission-doc-id-pattern (:id-pattern d)) "boot registers the verified id-pattern"))
+        (finally
+          ((:stop! s)))))))
 
 (deftest start-requires-allowed-penholders-by-default
   (testing "boot fails loudly when no allowed penholders are configured"

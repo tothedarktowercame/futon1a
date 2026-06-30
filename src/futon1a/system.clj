@@ -11,6 +11,7 @@
             [clojure.string :as str]
             [futon1a.core.xtdb-node :as xtnode]
             [futon1a.http.app :as http-app]
+            [futon1a.scripts.seed-futon1-descriptors :as seed]
             [ring.adapter.jetty :as jetty]))
 
 (defn- windows-drive-path?
@@ -126,6 +127,12 @@
         base-store (xtnode/xtdb-store node)
         store (with-meta base-store (assoc (or (meta base-store) {})
                                            :proof-log-path proof-log-path))
+        ;; Boot-time governance (E-futon1a-archivist): register the canonical
+        ;; :mission/doc id-contract into the in-memory model registry so the L4
+        ;; write-gate is active from start. Without this the gate evaporates on
+        ;; every JVM restart until someone re-registers by hand — i.e. it would
+        ;; not be durable governance. Idempotent (override?).
+        _ (seed/register-mission-contract!)
         handler (-> (http-app/ring-handler {:node node
                                             :store store
                                             :data-dir data-dir
