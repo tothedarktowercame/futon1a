@@ -25,6 +25,38 @@
     (and entity-id (some #(re-find (re-pattern %) entity-id) queue)) :queue
     :else :reject))
 
+(defn gate-entity-id!
+  "L4 canonical-id gate for a single entity doc on the run-write! (/entity compat)
+   path — the path the mission-doc-watcher, capability-ingest, and agent /entity
+   writes actually use (open-world/ingest! is only the /ingest route). Mirrors the
+   id-gate in validate-model so the gate is not inert on the live write path
+   (E-futon1a-archivist). No descriptor / no :id-pattern => no-op (back-compat).
+   :accept => nil · :queue => records worklist + returns {:queued? true} (lets the
+   write through) · :reject => records + throws L4 400."
+  [entity]
+  (let [model-id (:entity/type entity)
+        descriptor (registry/get-model model-id)]
+    (when descriptor
+      (let [id-field (get descriptor :id-field :entity/id)
+            id-val (get entity id-field)]
+        (case (classify-id id-val descriptor)
+          :reject
+          (do (gate-queue/record! {:entity-id id-val :entity-type model-id
+                                   :disposition :rejected :reason :non-canonical-id
+                                   :expected (:id-pattern descriptor)})
+              (throw (ex-info "non-canonical entity id"
+                              {:error (mv/layer4-error
+                                       :non-canonical-id
+                                       {:entity/id id-val :id-field id-field
+                                        :entity/type model-id
+                                        :expected (:id-pattern descriptor)})})))
+          :queue
+          (do (gate-queue/record! {:entity-id id-val :entity-type model-id
+                                   :disposition :queued :reason :alias-pending-migration
+                                   :expected (:id-pattern descriptor)})
+              {:queued? true})
+          :accept nil)))))
+
 (defn- validate-model
   [{:keys [entity require-model?]}]
   (let [model-id (:entity/type entity)

@@ -85,3 +85,25 @@
                             :relations []})]
       (is (= 1 (get-in resp [:counts :models-validated])))
       (is (empty? (gate-queue/snapshot))))))
+
+;; The /entity compat path (run-write!) the watcher/capability-ingest/agents use
+;; goes through ow/gate-entity-id!, NOT ow/ingest!. These lock that path so the
+;; gate is not inert on the live write path (E-futon1a-archivist cutover).
+(deftest gate-entity-id!-rejects-islands-on-write-path
+  (testing "non-canonical :entity/name throws (L4 400) and is recorded"
+    (is (thrown? clojure.lang.ExceptionInfo
+                 (ow/gate-entity-id! (mission "mission:M-autoclock-in"))))
+    (is (thrown? clojure.lang.ExceptionInfo
+                 (ow/gate-entity-id! (mission "futon3c-desktop-save-d/mission/x"))))
+    (is (= 2 (count (gate-queue/snapshot))))
+    (is (every? #(= :rejected (:gate/disposition %)) (gate-queue/snapshot)))))
+
+(deftest gate-entity-id!-accepts-canonical-and-queues-aliases
+  (testing "canonical => nil (accept); bare M-* => {:queued? true} + recorded; no descriptor => nil"
+    (is (nil? (ow/gate-entity-id! (mission "futon3c-d/mission/autoclock-in"))))
+    (is (nil? (ow/gate-entity-id! (mission "futon7-d/mission/IRC-stability"))))
+    (is (empty? (gate-queue/snapshot)) "accepts leave no record")
+    (is (= {:queued? true} (ow/gate-entity-id! (mission "M-5"))))
+    (is (= 1 (count (gate-queue/snapshot))))
+    (is (nil? (ow/gate-entity-id! {:entity/type :no-descriptor-type :entity/name "x"}))
+        "type with no descriptor is a no-op")))

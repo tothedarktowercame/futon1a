@@ -71,6 +71,11 @@
   (expansion/expansion-gate! {:expansion expansion
                               :allowed-expansions (or allowed-expansions #{})})
   (mv/validate-model! {:model model :required-keys (or required-keys #{})})
+  ;; L4 canonical-id gate (E-futon1a-archivist): entity writes only; no-op for
+  ;; types without an :id-pattern descriptor. Gates the /entity compat path that
+  ;; the watcher/capability-ingest/agents use (open-world/ingest! is only /ingest).
+  (when (:entity/type model)
+    (open-world/gate-entity-id! model))
   (when-not (vector? tx-ops)
     (throw (ex-info "tx-ops required"
                     {:error (mv/layer4-error :missing-tx-ops
