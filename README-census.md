@@ -120,6 +120,14 @@ The node is `(:node @futon3c.dev/!f1-sys)`; alias `xtdb.api` (already loaded).
    stale, run the probe before assuming the data is right.
 8. **Never restart the serving JVM** (it hosts 7071/7070/6768/3100). Reload via
    Drawbridge `load-file`. See `futon3c/README-drawbridge.md`.
+9. **RELATIONS are invisible to the census/type endpoints.** `census?type=` and
+   `hyperedges?type=` count hyperedge/entity docs — a relation written via
+   `POST /relation` shows `:count 0` on both even when present. Relation docs
+   store their type KEYWORDIZED (`:relation/type :outcome-ref`, not
+   `"outcome-ref"`). Count/join them via Drawbridge datalog:
+   `{:find [(count r)] :where [[r :relation/type :outcome-ref]]}` — found the
+   hard way during R19-PROOF-JOIN (2026-07-02, claude-3 diagnosis: the 252
+   freshly-written relations "didn't exist" by HTTP scan; they were all there).
 
 ## 4. Freshness / liveness check
 
