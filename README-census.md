@@ -85,6 +85,76 @@ The node is `(:node @futon3c.dev/!f1-sys)`; alias `xtdb.api` (already loaded).
 > and quote whole query maps; some heredoc/`'`-reader-macro combinations choke —
 > prefer fully-qualified `xtdb.api/q` + `(quote …)`.
 
+### Drawbridge write smoke (A3 witness path, 2026-07-07)
+
+Finding for futon1a#6: Drawbridge can write and read the same live XTDB node.
+No `:7071` HTTP write path or JVM restart is required for A3 witness writes
+when the writer already has a fully-formed XTDB document. The sanctioned write
+surface is `xtdb.api/submit-tx` followed by `xtdb.api/await-tx`; the sanctioned
+proof surface is `xtdb.api/q` against `(xtdb.api/db (:node @futon3c.dev/!f1-sys))`.
+
+Canonical smoke form, with temporary docs marked and evicted after proof:
+
+```clojure
+(do
+  (require (quote xtdb.api))
+  (let [node (:node @futon3c.dev/!f1-sys)
+        entity-id "a3-smoketest/entity/<run-id>"
+        hx-id "a3-smoketest/hyperedge/<run-id>"
+        mission-id "futon3c-d/mission/typed-holes-lean-handoffs"
+        entity-doc {:xt/id entity-id
+                    :entity/id entity-id
+                    :entity/name "A3 substrate2 access smoke"
+                    :entity/type :a3-smoketest
+                    :entity/source "M-actuator-spec-substrate2-access"
+                    :entity/props {:a3-smoketest? true
+                                   :evict-after-proof true}}
+        hx-doc {:xt/id hx-id
+                :hx/id hx-id
+                :hx/type :a3-smoketest/mission-link
+                :hx/endpoints [entity-id mission-id]
+                :a3-smoketest? true
+                :a3-smoketest/evict-after-proof true}
+        write-tx (xtdb.api/submit-tx node [[:xtdb.api/put entity-doc]
+                                           [:xtdb.api/put hx-doc]])]
+    (xtdb.api/await-tx node write-tx)
+    (let [proof (xtdb.api/q (xtdb.api/db node)
+                            (quote {:find [entity entity-type hx hx-type endpoint]
+                                    :in [entity-id hx-id]
+                                    :where [[entity :entity/id entity-id]
+                                            [entity :entity/type entity-type]
+                                            [hx :hx/id hx-id]
+                                            [hx :hx/type hx-type]
+                                            [hx :hx/endpoints endpoint]]})
+                            entity-id hx-id)
+          evict-tx (xtdb.api/submit-tx node [[:xtdb.api/evict entity-id]
+                                             [:xtdb.api/evict hx-id]])]
+      (xtdb.api/await-tx node evict-tx)
+      {:write-tx write-tx
+       :proof proof
+       :evict-tx evict-tx})))
+```
+
+Observed live result for run id `codex-1-2026-07-07T000003Z`:
+
+```clojure
+{:write-tx {:xtdb.api/tx-id 9230625,
+            :xtdb.api/tx-time #inst "2026-07-07T13:46:46.951-00:00"}
+ :proof #{["a3-smoketest/entity/codex-1-2026-07-07T000003Z"
+           :a3-smoketest
+           "a3-smoketest/hyperedge/codex-1-2026-07-07T000003Z"
+           :a3-smoketest/mission-link
+           "a3-smoketest/entity/codex-1-2026-07-07T000003Z"]
+          ["a3-smoketest/entity/codex-1-2026-07-07T000003Z"
+           :a3-smoketest
+           "a3-smoketest/hyperedge/codex-1-2026-07-07T000003Z"
+           :a3-smoketest/mission-link
+           "futon3c-d/mission/typed-holes-lean-handoffs"]}
+ :evict-tx {:xtdb.api/tx-id 9230626,
+            :xtdb.api/tx-time #inst "2026-07-07T13:46:47.027-00:00"}
+ :post-evict #{}}
+```
+
 ## 3. Footguns (read these — they cost real hours)
 
 1. **A `0` from a type scan is usually a lie (timeout).** A high-`limit`
