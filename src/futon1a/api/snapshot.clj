@@ -75,11 +75,19 @@
   ~1.4s from the index without materializing/sorting the whole result. This is
   the id-iteration primitive that makes the full hyperedge export possible.
   (Also avoids the per-type `(count e)` census timeout entirely.) Added for
-  E-futon1a-to-futon1b-migration-pipeline (full-store hyperedge export)."
+  E-futon1a-to-futon1b-migration-pipeline (full-store hyperedge export).
+
+  NB (2026-07-10, measured live): the store holds ~5.74M DISTINCT hyperedge
+  ids — 88.5% are :code/v05/watcher-event telemetry (each event mints a fresh
+  id); the real code/mission graph is ~658k docs. `open-q` also emits a few
+  thousand duplicate rows (unlike `q` it does not dedupe), so the `distinct`
+  transducer stays, but the volume is genuine ids, not versions. A full
+  unfiltered fetch OOMs the serving JVM (~2.5M docs in memory) — any
+  full-hyperedge export must stream to disk and/or filter watcher-event."
   [node]
   (let [db (xtdb/db node)]
     (with-open [c (xtdb/open-q db '{:find [e] :where [[e :hx/id]]})]
-      (into [] (map first) (iterator-seq c)))))
+      (into [] (comp (map first) (distinct)) (iterator-seq c)))))
 
 (defn- list-evidence-doc-ids
   "Return a vector of XTDB entity ids for evidence docs (docs with
@@ -91,7 +99,7 @@
   [node]
   (let [db (xtdb/db node)]
     (with-open [c (xtdb/open-q db '{:find [e] :where [[e :evidence/id]]})]
-      (into [] (map first) (iterator-seq c)))))
+      (into [] (comp (map first) (distinct)) (iterator-seq c)))))
 
 (def !progress
   "Live progress of a running export (2026-07-10, migration observability):

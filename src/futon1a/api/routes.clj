@@ -1090,12 +1090,23 @@
                                             (:valid-time payload)))
           retract? (= "retract" (some-> (or (:hx/op payload) (:op payload))
                                         name str/lower-case))
+          ;; No-op guard (2026-07-10): writers (notably the futon3c file
+          ;; watcher) re-post unchanged hyperedges on every pass — sampled
+          ;; live: a code/v05/contains doc with 63 versions and 2 distinct
+          ;; contents. A put identical to the stored doc creates a new
+          ;; version and nothing else, so skip it. Plain puts only: retracts
+          ;; and explicit-valid-time puts carry temporal intent.
+          no-op? (and (not retract?)
+                      (nil? valid-time)
+                      (= doc (xtdb/entity (xtdb/db node) (:xt/id doc))))
           tx-op (if retract?
                   (cond-> [:xtdb.api/delete (:xt/id doc)]
                     valid-time (conj valid-time))
                   (cond-> [:xtdb.api/put doc]
                     valid-time (conj valid-time)))
-          result (pipeline/run-write!
+          result (if no-op?
+                   ::no-op
+                   (pipeline/run-write!
                   {:store store
                    :penholder penholder
                    :allowed-penholders allowed-penholders
@@ -1105,12 +1116,16 @@
                    :claim {:op :compat/futon1-hyperedge}
                    :detail (cond-> {:hx/type (:hx/type payload)}
                              valid-time (assoc :hx/valid-time valid-time)
-                             retract? (assoc :hx/op :retract))})]
-      (ok (cond-> {:profile (or profile "default")
-                   :hyperedge hyperedge
-                   :tx-id (:tx-id result)
-                   :path/id (get-in result [:path :path/id])}
-            retract? (assoc :retracted? true))))))
+                             retract? (assoc :hx/op :retract))}))]
+      (if (= ::no-op result)
+        (ok {:profile (or profile "default")
+             :hyperedge hyperedge
+             :no-op? true})
+        (ok (cond-> {:profile (or profile "default")
+                     :hyperedge hyperedge
+                     :tx-id (:tx-id result)
+                     :path/id (get-in result [:path :path/id])}
+              retract? (assoc :retracted? true)))))))
 
 (defn hyperedge-by-id
   "GET /api/alpha/hyperedge/:id — fetch a single hyperedge by its :hx/id."
