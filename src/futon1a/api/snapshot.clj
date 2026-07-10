@@ -93,6 +93,13 @@
     (with-open [c (xtdb/open-q db '{:find [e] :where [[e :evidence/id]]})]
       (into [] (map first) (iterator-seq c)))))
 
+(def !progress
+  "Live progress of a running export (2026-07-10, migration observability):
+  {:phase :ids|:fetch|:write|:done|:error :done n :total n :scope s :at ms}.
+  Read via Drawbridge while a snapshot export runs — the ~246k-doc hyperedge
+  fetch loop is minutes long and was previously a black box."
+  (atom nil))
+
 (defn export-graph-snapshot
   "Export current graph docs to an EDN snapshot file.
 
@@ -116,15 +123,27 @@
                       ev?               "evidence"
                       (= scope "latest") "latest"
                       :else             (str "snap-" (now-ms)))
+        _ (reset! !progress {:phase :ids :scope scope
+                             :at (System/currentTimeMillis)})
         ids (cond
               hx? (list-hyperedge-doc-ids node)
               ev? (list-evidence-doc-ids node)
               :else (list-graph-doc-ids node))
+        _ (reset! !progress {:phase :fetch :scope scope :done 0
+                             :total (count ids)
+                             :at (System/currentTimeMillis)})
         db (xtdb/db node)
         docs (->> ids
-                  (mapv (fn [id] (xtdb/entity db id)))
-                  (remove nil?)
-                  (vec))
+                  (into []
+                        (comp (map-indexed
+                               (fn [i id]
+                                 (when (zero? (mod (inc i) 2000))
+                                   (swap! !progress assoc :done (inc i)
+                                          :at (System/currentTimeMillis)))
+                                 (xtdb/entity db id)))
+                              (remove nil?))))
+        _ (swap! !progress assoc :phase :write :done (count ids)
+                 :at (System/currentTimeMillis))
         counts (cond
                  hx? {:docs (count docs)
                       :ids (count ids)
@@ -149,6 +168,7 @@
       (binding [*out* w
                 *print-readably* true]
         (pr (edn-safe payload))))
+    (swap! !progress assoc :phase :done :at (System/currentTimeMillis))
     {:ok? true
      :snapshot/id snapshot-id
      :snapshot/file file
