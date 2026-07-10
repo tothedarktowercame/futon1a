@@ -65,6 +65,34 @@
          (distinct)
          (vec))))
 
+(defn- list-hyperedge-doc-ids
+  "Return a vector of XTDB entity ids for hyperedge docs (docs with :hx/id).
+
+  Uses a LAZY `open-q` cursor, NOT `q`. There are ~246k hyperedges, and a
+  materializing `q` over all of them (or any `:order-by`) hits XTDB's ~30s
+  server-side query timeout under live load — verified: `q` id-scan and any
+  `:order-by`+`:limit` both time out at 30s, while `open-q` streams 20k ids in
+  ~1.4s from the index without materializing/sorting the whole result. This is
+  the id-iteration primitive that makes the full hyperedge export possible.
+  (Also avoids the per-type `(count e)` census timeout entirely.) Added for
+  E-futon1a-to-futon1b-migration-pipeline (full-store hyperedge export)."
+  [node]
+  (let [db (xtdb/db node)]
+    (with-open [c (xtdb/open-q db '{:find [e] :where [[e :hx/id]]})]
+      (into [] (map first) (iterator-seq c)))))
+
+(defn- list-evidence-doc-ids
+  "Return a vector of XTDB entity ids for evidence docs (docs with
+  :evidence/id). Same lazy `open-q` idiom as list-hyperedge-doc-ids (see its
+  docstring for why `q`/`:order-by` are unusable at this scale). Added for
+  E-futon1a-to-futon1b-migration-pipeline F5: the session-scoped evidence
+  export misses SESSIONLESS evidence (docs with no :evidence/session-id,
+  e.g. mission-sync records) — this scope drains ALL evidence by id."
+  [node]
+  (let [db (xtdb/db node)]
+    (with-open [c (xtdb/open-q db '{:find [e] :where [[e :evidence/id]]})]
+      (into [] (map first) (iterator-seq c)))))
+
 (defn export-graph-snapshot
   "Export current graph docs to an EDN snapshot file.
 
@@ -76,24 +104,39 @@
                                              {:required #{:node :data-dir}})})))
   (let [scope (or scope "all")
         scope (if (keyword? scope) (name scope) (str scope))
-        _ (when-not (#{"all" "latest"} scope)
+        _ (when-not (#{"all" "latest" "hyperedges" "evidence"} scope)
             (throw (ex-info "invalid snapshot scope"
                             {:error (mv/layer4-error :invalid-snapshot-scope
                                                      {:scope scope
-                                                      :expected ["all" "latest"]})})))
-        snapshot-id (if (= scope "latest")
-                      "latest"
-                      (str "snap-" (now-ms)))
-        ids (list-graph-doc-ids node)
+                                                      :expected ["all" "latest" "hyperedges" "evidence"]})})))
+        hx? (= scope "hyperedges")
+        ev? (= scope "evidence")
+        snapshot-id (cond
+                      hx?               "hyperedges"
+                      ev?               "evidence"
+                      (= scope "latest") "latest"
+                      :else             (str "snap-" (now-ms)))
+        ids (cond
+              hx? (list-hyperedge-doc-ids node)
+              ev? (list-evidence-doc-ids node)
+              :else (list-graph-doc-ids node))
         db (xtdb/db node)
         docs (->> ids
                   (mapv (fn [id] (xtdb/entity db id)))
                   (remove nil?)
-                  (mapv (fn [doc] (if (:xt/id doc) doc (assoc doc :xt/id (:xt/id doc))))))
-        counts {:docs (count docs)
-                :ids (count ids)
-                :entities (count (filter :entity/id docs))
-                :relations (count (filter :relation/id docs))}
+                  (vec))
+        counts (cond
+                 hx? {:docs (count docs)
+                      :ids (count ids)
+                      :hyperedges (count (filter :hx/id docs))}
+                 ev? {:docs (count docs)
+                      :ids (count ids)
+                      :evidence (count (filter :evidence/id docs))
+                      :sessionless (count (remove :evidence/session-id docs))}
+                 :else {:docs (count docs)
+                        :ids (count ids)
+                        :entities (count (filter :entity/id docs))
+                        :relations (count (filter :relation/id docs))})
         file (snapshot-file data-dir snapshot-id)
         payload {:snapshot/id snapshot-id
                  :snapshot/scope scope
