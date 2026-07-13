@@ -72,8 +72,8 @@
                                       :entity/name name
                                       :entity/type :pattern/library
                                       :entity/external-id (or (:entity/external-id doc) (str name)))
-                               (cond-> (nil? (:futon1a/backfill/orig-type doc))
-                                 (assoc :futon1a/backfill/orig-type :devmap/prototype)))
+                               (cond-> (nil? (:futon1a.backfill/orig-type doc))
+                                 (assoc :futon1a.backfill/orig-type :devmap/prototype)))
                    component-id (stable-component-id eid)
                    component-name (str name "/01-summary")
                    component {:xt/id component-id

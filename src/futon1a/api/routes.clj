@@ -1227,14 +1227,19 @@
           _ (when-not (seq end-id)
               (throw (ex-info "end parameter required" {:end end-id})))
           resolved-id (resolve-end-id db end-id)
-          ;; Query :hx/endpoints (flat string vector) for the (possibly
-          ;; resolved) endpoint id.
-          results (->> (xtdb/q db (assoc '{:find [(pull e [*])]
-                                           :in [eid]
-                                           :where [[e :hx/endpoints eid]]}
-                                         :timeout hyperedge-query-timeout-ms)
-                               resolved-id)
+          ;; Hyperedges written by different compatibility paths may retain
+          ;; either the UUID or its semantic entity name. Query both forms so
+          ;; the advertised "whichever identifier callers hold" contract is
+          ;; true without rewriting historical documents.
+          endpoint-candidates (distinct [end-id resolved-id])
+          results (->> endpoint-candidates
+                       (mapcat #(xtdb/q db (assoc '{:find [(pull e [*])]
+                                                   :in [eid]
+                                                   :where [[e :hx/endpoints eid]]}
+                                                 :timeout hyperedge-query-timeout-ms)
+                                       %))
                        (map first)
+                       (distinct)
                        (map #(dissoc % :xt/id))
                        (sort-by #(str (:hx/id %)))
                        vec)
