@@ -1,5 +1,8 @@
 # futon1a
 
+> **New to FUTON? Start with [futon0/INSTALL.md](https://github.com/tothedarktowercame/futon0/blob/main/INSTALL.md)**, the single guide to
+> installing and running the stack. Not needed for the core install: the stack's store is now futon1b.
+
 `futon1a` is a ground-up rebuild of `futon1`: a deterministic storage substrate
 with explicit invariants, a canonical HTTP interface, and traceable
 pattern-to-code grounding. It is the flagship example of a futonic artifact in
